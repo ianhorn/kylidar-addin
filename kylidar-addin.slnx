@@ -1,3 +1,8 @@
 <Solution>
-  <Project Path="KylidarAddin.csproj" />
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="KylidarAddin.csproj">
+    <Platform Project="x64" />
+  </Project>
 </Solution>
