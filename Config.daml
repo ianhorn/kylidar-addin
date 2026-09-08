@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ArcGIS defaultAssembly="KylidarAddin.dll" defaultNamespace="KylidarAddin"
+        xmlns="http://schemas.esri.com/DADF/Registry"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://schemas.esri.com/DADF/Registry file:///C:/Program%20Files/ArcGIS/Pro/bin/ArcGIS.Desktop.Framework.xsd">
+
+  <AddInInfo id="{f2cadbcc-46f7-48b0-8cb4-9b56b3eb038d}" version="1.0.0.0" desktopVersion="3.6.0" product="ArcGISPro">
+    <Name>Kylidar Add-in</Name>
+    <Description>Kylidar Add-in description</Description>
+    <Image>Images\AddInDesktop32.png</Image>
+    <Author>Ian Horn</Author>
+    <Company>Kylidar</Company>
+    <Date>9/7/2026</Date>
+    <Subject>Framework</Subject>
+    <!-- Note subject can be one or more of these topics:
+                    Content, Framework, Editing, Geodatabase, Geometry, Geoprocessing, Layouts, Map Authoring, Map Exploration -->
+  </AddInInfo>
+
+  <modules>
+    <insertModule id="KylidarAddin_Module" className="Module1" autoLoad="false" caption="Module1">
+      <!-- uncomment to have the control hosted on a separate tab-->
+      <tabs>
+        <!--<tab id="KylidarAddin_Tab1" caption="New Tab">
+          <group refID="KylidarAddin_Group1"/>
+        </tab>-->
+      </tabs>
+
+      <groups>
+        <!-- comment this out if you have no controls on the Addin tab to avoid
+              an empty group-->
+        <group id="KylidarAddin_Group1" caption="Group 1" appearsOnAddInTab="true">
+          <!-- host controls within groups -->
+        </group>
+      </groups>
+
+      <controls>
+        <!-- add your controls here -->
+      </controls>
+
+    </insertModule>
+  </modules>
+</ArcGIS>

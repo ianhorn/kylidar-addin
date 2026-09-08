@@ -1,0 +1,27 @@
+## .NET / Visual Studio build output
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio cache/options
+.vs/
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Esri add-in packages (binary output produced by the ArcGIS Pro SDK)
+*.esriAddinX
+*.esriAddin
+
+# MSBuild logs
+*.binlog
+*.log
