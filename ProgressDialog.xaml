@@ -1,0 +1,21 @@
+<Window x:Class="KylidarAddin.ProgressDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Progress" Height="260" Width="440"
+        ResizeMode="CanMinimize" WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="True">
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBox Grid.Row="0" x:Name="LogBox" IsReadOnly="True" TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"/>
+        <ProgressBar Grid.Row="1" x:Name="Prog" IsIndeterminate="True" Height="16" Margin="0,8,0,8"/>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="CancelBtn" Content="Cancel" Padding="14,3" Margin="0,0,8,0" Click="Cancel_Click"/>
+            <Button x:Name="CloseBtn" Content="Close" Padding="14,3" Click="Close_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

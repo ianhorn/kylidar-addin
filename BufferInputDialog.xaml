@@ -1,0 +1,42 @@
+<Window x:Class="KylidarAddin.BufferInputDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Clip LiDAR to AOI" Height="200" Width="440"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="True">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Buffer distance (feet):" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="BufferFeetBox" Text="0" VerticalContentAlignment="Center"/>
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Output .las file:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="OutputPathBox" VerticalContentAlignment="Center" Margin="0,0,6,0"/>
+            <Button Grid.Column="2" Content="Browse..." Padding="10,3" Click="Browse_Click"/>
+        </Grid>
+
+        <TextBlock Grid.Row="2" x:Name="ValidationText" Foreground="Red" TextWrapping="Wrap" VerticalAlignment="Top"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="OkBtn" Content="Run" Padding="14,3" Margin="0,0,8,0" Click="Ok_Click" IsDefault="True"/>
+            <Button Content="Cancel" Padding="14,3" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
