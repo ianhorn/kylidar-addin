@@ -1,8 +1,9 @@
 /*
- * STAC API HTTP client, trimmed to what kylidar-addin needs: a single "intersects" search.
- * Default base points at the Kentucky From Above catalog, but the API/collections this add-in
- * targets may change later -- BaseUri is a mutable property, and LiDAR tiles are identified by
- * asset convention (StacAsset.IsCopc), not by a hardcoded collection id.
+ * STAC API HTTP client, trimmed to what kylidar-addin needs: a single "intersects" search,
+ * optionally scoped to specific collections (e.g. one LiDAR phase). Default base points at the
+ * Kentucky From Above catalog, but the API/collections this add-in targets may change later --
+ * BaseUri is a mutable property, and LiDAR tiles within a matched item are still identified by
+ * asset convention (StacAsset.IsLidar/IsCopc), not by hardcoding an asset key.
  */
 using System;
 using System.Collections.Generic;
@@ -43,12 +44,20 @@ namespace KylidarAddin.Stac
         /// <summary>
         /// Search for items intersecting a GeoJSON geometry (lon/lat, CRS84), via POST /search.
         /// </summary>
-        public async Task<StacItemCollection> SearchIntersectsAsync(string intersectsGeoJson, int limit = 200, CancellationToken ct = default)
+        public async Task<StacItemCollection> SearchIntersectsAsync(string intersectsGeoJson,
+            IReadOnlyCollection<string> collections = null, int limit = 200, CancellationToken ct = default)
         {
             using var ms = new MemoryStream();
             using (var writer = new Utf8JsonWriter(ms))
             {
                 writer.WriteStartObject();
+                if (collections != null && collections.Count > 0)
+                {
+                    writer.WritePropertyName("collections");
+                    writer.WriteStartArray();
+                    foreach (var c in collections) writer.WriteStringValue(c);
+                    writer.WriteEndArray();
+                }
                 writer.WritePropertyName("intersects");
                 using (var doc = JsonDocument.Parse(intersectsGeoJson))
                     doc.RootElement.WriteTo(writer);

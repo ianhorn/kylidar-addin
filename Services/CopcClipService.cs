@@ -1,8 +1,8 @@
 /*
- * Given an AOI geometry (map CRS) and an optional buffer in feet:
+ * Given an AOI geometry (map CRS), an optional buffer in feet, and the LiDAR phase(s) to search:
  *   1. Buffer the AOI (converting feet to the geometry's own linear unit).
- *   2. Project to WGS84 and search the STAC API for intersecting LiDAR (COPC) tiles.
- *   3. Download each matching COPC tile locally (see TileDownloadService / PdalRunner for why).
+ *   2. Project to WGS84 and search the selected STAC collections for intersecting LiDAR tiles.
+ *   3. Download each matching tile locally (see TileDownloadService / PdalRunner for why).
  *   4. Run a PDAL pipeline: crop each local tile to the AOI polygon, merge, write one .las.
  */
 using System;
@@ -44,7 +44,7 @@ namespace KylidarAddin.Services
         }
 
         public static async Task<ClipResult> ClipToAoiAsync(
-            string geoJson, string wkt, string outputLasPath,
+            string geoJson, string wkt, IReadOnlyCollection<string> collections, string outputLasPath,
             IProgress<string> progress, CancellationToken ct = default)
         {
             string tempDir = null;
@@ -52,34 +52,34 @@ namespace KylidarAddin.Services
             {
                 progress?.Report("Searching STAC catalog for LiDAR coverage...");
                 using var stac = new StacClient();
-                var results = await stac.SearchIntersectsAsync(geoJson, limit: 200, ct).ConfigureAwait(false);
+                var results = await stac.SearchIntersectsAsync(geoJson, collections, limit: 200, ct: ct).ConfigureAwait(false);
 
                 var tiles = new List<(StacItem item, StacAsset asset)>();
                 foreach (var item in results?.Features ?? Enumerable.Empty<StacItem>())
-                    foreach (var asset in item.GetCopcAssets())
+                    foreach (var asset in item.GetLidarAssets())
                         tiles.Add((item, asset));
 
                 if (tiles.Count == 0)
-                    return new ClipResult { Success = false, Error = "No LiDAR coverage found for this AOI." };
+                    return new ClipResult { Success = false, Error = "No LiDAR coverage found for this AOI in the selected phase(s)." };
 
                 progress?.Report($"Found {tiles.Count} LiDAR tile(s) intersecting the AOI.");
 
                 // 3. Download each tile locally.
                 tempDir = Path.Combine(Path.GetTempPath(), $"kylidar_{Guid.NewGuid():N}");
                 Directory.CreateDirectory(tempDir);
-                var localPaths = new List<string>();
+                var localTiles = new List<(string path, bool isCopc)>();
                 foreach (var (item, asset) in tiles)
                 {
                     ct.ThrowIfCancellationRequested();
                     var fileName = Path.GetFileName(new Uri(asset.Href).LocalPath);
                     var localPath = Path.Combine(tempDir, fileName);
                     await TileDownloadService.DownloadAsync(asset.Href, localPath, progress, ct).ConfigureAwait(false);
-                    localPaths.Add(localPath);
+                    localTiles.Add((localPath, asset.IsCopc));
                 }
 
                 // 4. Crop + merge + write via PDAL.
                 progress?.Report("Clipping and merging point cloud tiles...");
-                var pipelineJson = BuildPipelineJson(localPaths, wkt, outputLasPath);
+                var pipelineJson = BuildPipelineJson(localTiles, wkt, outputLasPath);
                 var pdalResult = await PdalRunner.RunPipelineAsync(pipelineJson, progress, ct).ConfigureAwait(false);
 
                 if (!pdalResult.Success)
@@ -126,8 +126,18 @@ namespace KylidarAddin.Services
             return GeometryEngine.Instance.Buffer(geometry, distanceInSrUnits);
         }
 
-        private static string BuildPipelineJson(IReadOnlyList<string> localCopcPaths, string cropWkt, string outputLasPath)
+        /// <summary>
+        /// Build a PDAL pipeline that crops each local tile to the AOI polygon and merges the
+        /// results into one .las. COPC tiles use readers.copc's built-in "polygon" bounds option
+        /// (spatially indexed, so cheaper even though the file is already local); plain LAS/LAZ
+        /// tiles (phase 1) use readers.las followed by an explicit filters.crop stage instead,
+        /// since that reader has no such option. All stages are explicitly tagged and wired via
+        /// "inputs" rather than relying on PDAL's implicit chaining, since branches here have a
+        /// different shape (one stage vs. two) depending on tile format.
+        /// </summary>
+        private static string BuildPipelineJson(IReadOnlyList<(string path, bool isCopc)> localTiles, string cropWkt, string outputLasPath)
         {
+            var polygonOption = cropWkt + "/EPSG:4326";
             using var ms = new MemoryStream();
             using (var w = new Utf8JsonWriter(ms))
             {
@@ -135,25 +145,70 @@ namespace KylidarAddin.Services
                 w.WritePropertyName("pipeline");
                 w.WriteStartArray();
 
-                foreach (var path in localCopcPaths)
+                var branchTags = new List<string>();
+                for (int i = 0; i < localTiles.Count; i++)
                 {
-                    w.WriteStartObject();
-                    w.WriteString("type", "readers.copc");
-                    w.WriteString("filename", path);
-                    w.WriteString("polygon", cropWkt + "/EPSG:4326");
-                    w.WriteEndObject();
+                    var (path, isCopc) = localTiles[i];
+                    if (isCopc)
+                    {
+                        var tag = $"tile{i}";
+                        w.WriteStartObject();
+                        w.WriteString("type", "readers.copc");
+                        w.WriteString("filename", path);
+                        w.WriteString("polygon", polygonOption);
+                        w.WriteString("tag", tag);
+                        w.WriteEndObject();
+                        branchTags.Add(tag);
+                    }
+                    else
+                    {
+                        var readTag = $"tile{i}_read";
+                        var cropTag = $"tile{i}_crop";
+                        w.WriteStartObject();
+                        w.WriteString("type", "readers.las");
+                        w.WriteString("filename", path);
+                        w.WriteString("tag", readTag);
+                        w.WriteEndObject();
+
+                        w.WriteStartObject();
+                        w.WriteString("type", "filters.crop");
+                        w.WriteString("polygon", polygonOption);
+                        w.WriteString("tag", cropTag);
+                        w.WritePropertyName("inputs");
+                        w.WriteStartArray();
+                        w.WriteStringValue(readTag);
+                        w.WriteEndArray();
+                        w.WriteEndObject();
+                        branchTags.Add(cropTag);
+                    }
                 }
 
-                if (localCopcPaths.Count > 1)
+                string writerInputTag;
+                if (branchTags.Count > 1)
                 {
+                    const string mergeTag = "merged";
                     w.WriteStartObject();
                     w.WriteString("type", "filters.merge");
+                    w.WriteString("tag", mergeTag);
+                    w.WritePropertyName("inputs");
+                    w.WriteStartArray();
+                    foreach (var tag in branchTags) w.WriteStringValue(tag);
+                    w.WriteEndArray();
                     w.WriteEndObject();
+                    writerInputTag = mergeTag;
+                }
+                else
+                {
+                    writerInputTag = branchTags[0];
                 }
 
                 w.WriteStartObject();
                 w.WriteString("type", "writers.las");
                 w.WriteString("filename", outputLasPath);
+                w.WritePropertyName("inputs");
+                w.WriteStartArray();
+                w.WriteStringValue(writerInputTag);
+                w.WriteEndArray();
                 w.WriteEndObject();
 
                 w.WriteEndArray();

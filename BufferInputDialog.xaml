@@ -1,11 +1,12 @@
 <Window x:Class="KylidarAddin.BufferInputDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Clip LiDAR to AOI" Height="200" Width="440"
+        Title="Clip LiDAR to AOI" Height="250" Width="440"
         ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
         ShowInTaskbar="True">
     <Grid Margin="12">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -25,6 +26,19 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="140"/>
                 <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="LiDAR phase(s):" VerticalAlignment="Center"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <CheckBox x:Name="Phase1Box" Content="Phase 1" Margin="0,0,14,0" VerticalAlignment="Center"/>
+                <CheckBox x:Name="Phase2Box" Content="Phase 2" Margin="0,0,14,0" VerticalAlignment="Center" IsChecked="True"/>
+                <CheckBox x:Name="Phase3Box" Content="Phase 3" VerticalAlignment="Center" IsChecked="True"/>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <TextBlock Text="Output .las file:" VerticalAlignment="Center"/>
@@ -32,9 +46,9 @@
             <Button Grid.Column="2" Content="Browse..." Padding="10,3" Click="Browse_Click"/>
         </Grid>
 
-        <TextBlock Grid.Row="2" x:Name="ValidationText" Foreground="Red" TextWrapping="Wrap" VerticalAlignment="Top"/>
+        <TextBlock Grid.Row="3" x:Name="ValidationText" Foreground="Red" TextWrapping="Wrap" VerticalAlignment="Top"/>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="OkBtn" Content="Run" Padding="14,3" Margin="0,0,8,0" Click="Ok_Click" IsDefault="True"/>
             <Button Content="Cancel" Padding="14,3" IsCancel="True"/>
         </StackPanel>

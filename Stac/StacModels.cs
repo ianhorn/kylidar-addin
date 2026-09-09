@@ -31,6 +31,10 @@ namespace KylidarAddin.Stac
 
         /// <summary>True if this asset is a Cloud Optimized Point Cloud (by filename convention).</summary>
         public bool IsCopc => !string.IsNullOrEmpty(Href) && Href.EndsWith(".copc.laz", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>True if this asset is any LiDAR point-cloud file (COPC or plain LAS/LAZ).</summary>
+        public bool IsLidar => !string.IsNullOrEmpty(Href) &&
+            (Href.EndsWith(".laz", StringComparison.OrdinalIgnoreCase) || Href.EndsWith(".las", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Item properties: known STAC core + common extensions, plus arbitrary extras.</summary>
@@ -55,9 +59,9 @@ namespace KylidarAddin.Stac
         [JsonPropertyName("assets")] public Dictionary<string, StacAsset> Assets { get; set; }
         [JsonPropertyName("properties")] public StacProperties Properties { get; set; }
 
-        /// <summary>Every COPC point-cloud asset on this item (there's usually exactly one).</summary>
-        public IEnumerable<StacAsset> GetCopcAssets() =>
-            Assets?.Values.Where(a => a != null && a.IsCopc) ?? Enumerable.Empty<StacAsset>();
+        /// <summary>Every LiDAR point-cloud asset on this item, COPC or plain LAS/LAZ (there's usually exactly one).</summary>
+        public IEnumerable<StacAsset> GetLidarAssets() =>
+            Assets?.Values.Where(a => a != null && a.IsLidar) ?? Enumerable.Empty<StacAsset>();
     }
 
     /// <summary>A GeoJSON FeatureCollection returned by STAC search / items endpoints.</summary>

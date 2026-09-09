@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Windows;
 using Microsoft.Win32;
@@ -9,6 +10,7 @@ namespace KylidarAddin
     {
         public double BufferFeet { get; private set; }
         public string OutputLasPath { get; private set; }
+        public IReadOnlyList<string> SelectedCollections { get; private set; }
 
         public BufferInputDialog()
         {
@@ -40,8 +42,19 @@ namespace KylidarAddin
                 return;
             }
 
+            var collections = new List<string>();
+            if (Phase1Box.IsChecked == true) collections.Add("laz-phase1");
+            if (Phase2Box.IsChecked == true) collections.Add("laz-phase2");
+            if (Phase3Box.IsChecked == true) collections.Add("laz-phase3");
+            if (collections.Count == 0)
+            {
+                ValidationText.Text = "Select at least one LiDAR phase.";
+                return;
+            }
+
             BufferFeet = feet;
             OutputLasPath = OutputPathBox.Text;
+            SelectedCollections = collections;
             DialogResult = true;
         }
     }
