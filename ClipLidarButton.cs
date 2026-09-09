@@ -38,8 +38,8 @@ namespace KylidarAddin
             {
                 var aoi = AoiState.Current;
                 var bufferFeet = dialog.BufferFeet;
-                var (geoJson, wkt) = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, bufferFeet, progress));
-                result = await CopcClipService.ClipToAoiAsync(geoJson, wkt, dialog.SelectedCollections, dialog.OutputLasPath, progress, cts.Token);
+                var (geoJson, wkt, bufferedAoi) = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, bufferFeet, progress));
+                result = await CopcClipService.ClipToAoiAsync(geoJson, wkt, bufferedAoi, dialog.SelectedCollections, dialog.OutputLasPath, progress, cts.Token);
             }
             catch (OperationCanceledException)
             {

@@ -14,6 +14,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using ArcGIS.Core.Geometry;
+using ArcGIS.Desktop.Framework.Threading.Tasks;
+using KylidarAddin.Services.Copc;
 using KylidarAddin.Stac;
 
 namespace KylidarAddin.Services
@@ -33,18 +35,18 @@ namespace KylidarAddin.Services
         /// no ArcGIS.Core.Geometry work and must NOT be run on/blocked against the MCT thread,
         /// since it awaits network I/O and an external process for potentially a long time.
         /// </summary>
-        public static (string geoJson, string wkt) PrepareAoi(Geometry aoi, double bufferFeet, IProgress<string> progress)
+        public static (string geoJson, string wkt, Geometry bufferedAoi) PrepareAoi(Geometry aoi, double bufferFeet, IProgress<string> progress)
         {
             var working = BufferInFeet(aoi, bufferFeet, progress);
             if (!(working is Polygon) && bufferFeet <= 0)
                 throw new InvalidOperationException("A buffer is required unless the AOI is already a polygon.");
 
             var wgs84 = (Geometry)GeometryEngine.Instance.Project(working, SpatialReferences.WGS84);
-            return (GeoJsonConverter.ToGeoJsonGeometry(wgs84), GeoJsonConverter.ToWkt(wgs84));
+            return (GeoJsonConverter.ToGeoJsonGeometry(wgs84), GeoJsonConverter.ToWkt(wgs84), working);
         }
 
         public static async Task<ClipResult> ClipToAoiAsync(
-            string geoJson, string wkt, IReadOnlyCollection<string> collections, string outputLasPath,
+            string geoJson, string wkt, Geometry bufferedAoi, IReadOnlyCollection<string> collections, string outputLasPath,
             IProgress<string> progress, CancellationToken ct = default)
         {
             string tempDir = null;
@@ -64,15 +66,35 @@ namespace KylidarAddin.Services
 
                 progress?.Report($"Found {tiles.Count} LiDAR tile(s) intersecting the AOI.");
 
-                // 3. Download each tile locally.
+                // 3. Fetch each tile locally -- a true partial (range-fetched) copy for COPC tiles
+                // when possible, falling back to a full download if anything about that path is
+                // unexpected (see CopcPartialFetchService's doc comment for why that's safe).
                 tempDir = Path.Combine(Path.GetTempPath(), $"kylidar_{Guid.NewGuid():N}");
                 Directory.CreateDirectory(tempDir);
+                var envelopeCache = new Dictionary<string, (double minX, double minY, double maxX, double maxY)>();
                 var localTiles = new List<(string path, bool isCopc)>();
                 foreach (var (item, asset) in tiles)
                 {
                     ct.ThrowIfCancellationRequested();
                     var fileName = Path.GetFileName(new Uri(asset.Href).LocalPath);
                     var localPath = Path.Combine(tempDir, fileName);
+
+                    if (asset.IsCopc)
+                    {
+                        try
+                        {
+                            await CopcPartialFetchService.FetchAsync(asset.Href, localPath,
+                                srsWkt => ResolveAoiEnvelopeAsync(bufferedAoi, srsWkt, envelopeCache),
+                                progress, ct).ConfigureAwait(false);
+                            localTiles.Add((localPath, true));
+                            continue;
+                        }
+                        catch (CopcPartialFetchException ex)
+                        {
+                            progress?.Report($"Partial fetch unavailable for {fileName} ({ex.Message}); falling back to full download.");
+                        }
+                    }
+
                     await TileDownloadService.DownloadAsync(asset.Href, localPath, progress, ct).ConfigureAwait(false);
                     localTiles.Add((localPath, asset.IsCopc));
                 }
@@ -94,6 +116,29 @@ namespace KylidarAddin.Services
                     try { Directory.Delete(tempDir, recursive: true); } catch { /* ignore */ }
                 }
             }
+        }
+
+        /// <summary>
+        /// Reproject the buffered AOI into a tile's native CRS (parsed from that tile's own SRS
+        /// WKT VLR) and return its envelope, caching by WKT so repeat tiles sharing a CRS (the
+        /// common case -- one state, one canonical LiDAR CRS across phases) skip the MCT round
+        /// trip. Must only be called from off the MCT thread (it does its own QueuedTask.Run).
+        /// </summary>
+        private static async Task<(double minX, double minY, double maxX, double maxY)> ResolveAoiEnvelopeAsync(
+            Geometry bufferedAoi, string tileSrsWkt, Dictionary<string, (double, double, double, double)> cache)
+        {
+            if (cache.TryGetValue(tileSrsWkt, out var cached)) return cached;
+
+            var result = await QueuedTask.Run(() =>
+            {
+                var targetSr = SpatialReferenceBuilder.CreateSpatialReference(tileSrsWkt);
+                var reprojected = GeometryEngine.Instance.Project(bufferedAoi, targetSr);
+                var ext = reprojected.Extent;
+                return (ext.XMin, ext.YMin, ext.XMax, ext.YMax);
+            }).ConfigureAwait(false);
+
+            cache[tileSrsWkt] = result;
+            return result;
         }
 
         /// <summary>Buffer a geometry by a distance in feet, converting to the geometry's own linear unit.</summary>
