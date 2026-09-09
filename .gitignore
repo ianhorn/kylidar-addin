@@ -20,7 +20,7 @@ aprx*
 *.sln.docstates
 
 # Esri add-in packages (binary output produced by the ArcGIS Pro SDK)
-*.esriAddinX
+# *.esriAddinX
 *.esriAddin
 
 # MSBuild logs
