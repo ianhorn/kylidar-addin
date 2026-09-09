@@ -26,11 +26,9 @@
 
       <groups>
         <group id="KylidarAddin_Group1" caption="LiDAR AOI" appearsOnAddInTab="false" keytip="G1">
-          <toolPalette id="KylidarAddin_DrawAoiPalette" size="large" itemsInRow="1">
-            <tool refID="KylidarAddin_DrawPointAoiTool"/>
-            <tool refID="KylidarAddin_DrawLineAoiTool"/>
-            <tool refID="KylidarAddin_DrawPolygonAoiTool"/>
-          </toolPalette>
+          <tool refID="KylidarAddin_DrawPointAoiTool" size="large"/>
+          <tool refID="KylidarAddin_DrawLineAoiTool" size="large"/>
+          <tool refID="KylidarAddin_DrawPolygonAoiTool" size="large"/>
           <button refID="KylidarAddin_ClipLidarButton" size="large"/>
         </group>
       </groups>
