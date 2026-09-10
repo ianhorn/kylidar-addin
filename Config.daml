@@ -20,15 +20,22 @@
     <insertModule id="KylidarAddin_Module" className="Module1" autoLoad="false" caption="Module1">
       <tabs>
         <tab id="KylidarAddin_Tab1" caption="Kylidar" keytip="K0">
-          <group refID="KylidarAddin_Group1"/>
+          <group refID="KylidarAddin_GroupDraw"/>
+          <group refID="KylidarAddin_GroupSelect"/>
+          <group refID="KylidarAddin_GroupClip"/>
         </tab>
       </tabs>
 
       <groups>
-        <group id="KylidarAddin_Group1" caption="LiDAR AOI" appearsOnAddInTab="false" keytip="G1">
+        <group id="KylidarAddin_GroupDraw" caption="Draw AOI" appearsOnAddInTab="false" keytip="G1">
           <tool refID="KylidarAddin_DrawPointAoiTool" size="large"/>
           <tool refID="KylidarAddin_DrawLineAoiTool" size="large"/>
           <tool refID="KylidarAddin_DrawPolygonAoiTool" size="large"/>
+        </group>
+        <group id="KylidarAddin_GroupSelect" caption="Select AOI" appearsOnAddInTab="false" keytip="G2">
+          <tool refID="KylidarAddin_SelectFeatureAoiTool" size="large"/>
+        </group>
+        <group id="KylidarAddin_GroupClip" caption="LiDAR" appearsOnAddInTab="false" keytip="G3">
           <button refID="KylidarAddin_ClipLidarButton" size="large"/>
         </group>
       </groups>
@@ -36,22 +43,27 @@
       <controls>
         <tool id="KylidarAddin_DrawPointAoiTool" caption="Draw Point AOI" className="DrawPointAoiTool"
               loadOnClick="true" condition="esri_mapping_mapPane"
-              smallImage="GenericPoint16" largeImage="GenericPoint32">
+              smallImage="Images\DrawPointAoi16.png" largeImage="Images\DrawPointAoi32.png">
           <tooltip heading="Draw Point AOI">Draw a point to use as the LiDAR clip AOI.<disabledText /></tooltip>
         </tool>
         <tool id="KylidarAddin_DrawLineAoiTool" caption="Draw Line AOI" className="DrawLineAoiTool"
               loadOnClick="true" condition="esri_mapping_mapPane"
-              smallImage="GenericLine16" largeImage="GenericLine32">
+              smallImage="Images\DrawLineAoi16.png" largeImage="Images\DrawLineAoi32.png">
           <tooltip heading="Draw Line AOI">Draw a line to use as the LiDAR clip AOI.<disabledText /></tooltip>
         </tool>
         <tool id="KylidarAddin_DrawPolygonAoiTool" caption="Draw Polygon AOI" className="DrawPolygonAoiTool"
               loadOnClick="true" condition="esri_mapping_mapPane"
-              smallImage="GenericPolygon16" largeImage="GenericPolygon32">
+              smallImage="Images\DrawPolygonAoi16.png" largeImage="Images\DrawPolygonAoi32.png">
           <tooltip heading="Draw Polygon AOI">Draw a polygon to use as the LiDAR clip AOI.<disabledText /></tooltip>
+        </tool>
+        <tool id="KylidarAddin_SelectFeatureAoiTool" caption="Select Feature AOI" className="SelectFeatureAoiTool"
+              loadOnClick="true" condition="esri_mapping_mapPane"
+              smallImage="Images\SelectFeatureAoi16.png" largeImage="Images\SelectFeatureAoi32.png">
+          <tooltip heading="Select Feature AOI">Click (or drag a box over) an existing feature to use its geometry as the LiDAR clip AOI.<disabledText /></tooltip>
         </tool>
         <button id="KylidarAddin_ClipLidarButton" caption="Clip LiDAR to AOI" className="ClipLidarButton"
                 loadOnClick="true" smallImage="Images\AddInDesktop16.png" largeImage="Images\AddInDesktop32.png">
-          <tooltip heading="Clip LiDAR to AOI">Search, download, and clip LiDAR point-cloud tiles to the drawn AOI, producing a single .las file.<disabledText /></tooltip>
+          <tooltip heading="Clip LiDAR to AOI">Search, download, and clip LiDAR point-cloud tiles to the AOI, producing a single .las file.<disabledText /></tooltip>
         </button>
       </controls>
 

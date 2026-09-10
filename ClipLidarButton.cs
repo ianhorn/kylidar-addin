@@ -18,7 +18,7 @@ namespace KylidarAddin
         {
             if (AoiState.Current == null)
             {
-                MessageBox.Show("Draw an AOI first (point, line, or polygon), then click this button.",
+                MessageBox.Show("Draw an AOI (point, line, or polygon) or select a feature first, then click this button.",
                     "Kylidar", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }

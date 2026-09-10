@@ -30,6 +30,22 @@
     <Content Include="Images\AddInDesktop32.png" />
     <Content Include="DarkImages\AddInDesktop16.png" />
     <Content Include="DarkImages\AddInDesktop32.png" />
+    <Content Include="Images\DrawPointAoi16.png" />
+    <Content Include="Images\DrawPointAoi32.png" />
+    <Content Include="Images\DrawLineAoi16.png" />
+    <Content Include="Images\DrawLineAoi32.png" />
+    <Content Include="Images\DrawPolygonAoi16.png" />
+    <Content Include="Images\DrawPolygonAoi32.png" />
+    <Content Include="Images\SelectFeatureAoi16.png" />
+    <Content Include="Images\SelectFeatureAoi32.png" />
+    <Content Include="DarkImages\DrawPointAoi16.png" />
+    <Content Include="DarkImages\DrawPointAoi32.png" />
+    <Content Include="DarkImages\DrawLineAoi16.png" />
+    <Content Include="DarkImages\DrawLineAoi32.png" />
+    <Content Include="DarkImages\DrawPolygonAoi16.png" />
+    <Content Include="DarkImages\DrawPolygonAoi32.png" />
+    <Content Include="DarkImages\SelectFeatureAoi16.png" />
+    <Content Include="DarkImages\SelectFeatureAoi32.png" />
   </ItemGroup>
 
   <!--
