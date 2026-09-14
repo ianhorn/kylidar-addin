@@ -26,3 +26,5 @@ aprx*
 # MSBuild logs
 *.binlog
 *.log
+
+*.gdb
