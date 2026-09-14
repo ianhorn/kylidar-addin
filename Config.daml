@@ -20,27 +20,20 @@
     <insertModule id="KylidarAddin_Module" className="Module1" autoLoad="false" caption="Module1">
       <tabs>
         <tab id="KylidarAddin_Tab1" caption="Kylidar" keytip="K0">
-          <group refID="KylidarAddin_GroupDraw"/>
-          <group refID="KylidarAddin_GroupSelect"/>
-          <group refID="KylidarAddin_GroupClip"/>
+          <group refID="KylidarAddin_GroupMain"/>
         </tab>
       </tabs>
 
       <groups>
-        <group id="KylidarAddin_GroupDraw" caption="Draw AOI" appearsOnAddInTab="false" keytip="G1">
-          <tool refID="KylidarAddin_DrawPointAoiTool" size="large"/>
-          <tool refID="KylidarAddin_DrawLineAoiTool" size="large"/>
-          <tool refID="KylidarAddin_DrawPolygonAoiTool" size="large"/>
-        </group>
-        <group id="KylidarAddin_GroupSelect" caption="Select AOI" appearsOnAddInTab="false" keytip="G2">
-          <tool refID="KylidarAddin_SelectFeatureAoiTool" size="large"/>
-        </group>
-        <group id="KylidarAddin_GroupClip" caption="LiDAR" appearsOnAddInTab="false" keytip="G3">
-          <button refID="KylidarAddin_ClipLidarButton" size="large"/>
+        <group id="KylidarAddin_GroupMain" caption="Kylidar" appearsOnAddInTab="false" keytip="G1">
+          <button refID="KylidarAddin_Dockpane_ShowButton" size="large"/>
         </group>
       </groups>
 
       <controls>
+        <!-- These AOI tools are not placed in a group (so they don't appear on the ribbon);
+             they're activated from the Kylidar dock pane via FrameworkApplication.SetCurrentToolAsync,
+             which resolves them by the ID registered here. -->
         <tool id="KylidarAddin_DrawPointAoiTool" caption="Draw Point AOI" className="DrawPointAoiTool"
               loadOnClick="true" condition="esri_mapping_mapPane"
               smallImage="Images\DrawPointAoi16.png" largeImage="Images\DrawPointAoi32.png">
@@ -61,11 +54,17 @@
               smallImage="Images\SelectFeatureAoi16.png" largeImage="Images\SelectFeatureAoi32.png">
           <tooltip heading="Select Feature AOI">Click (or drag a box over) an existing feature to use its geometry as the LiDAR clip AOI.<disabledText /></tooltip>
         </tool>
-        <button id="KylidarAddin_ClipLidarButton" caption="Clip LiDAR to AOI" className="ClipLidarButton"
+        <button id="KylidarAddin_Dockpane_ShowButton" caption="Kylidar" className="KylidarDockpaneShowButton"
                 loadOnClick="true" smallImage="Images\AddInDesktop16.png" largeImage="Images\AddInDesktop32.png">
-          <tooltip heading="Clip LiDAR to AOI">Search, download, and clip LiDAR point-cloud tiles to the AOI, producing a single .las file.<disabledText /></tooltip>
+          <tooltip heading="Kylidar">Open the Kylidar pane to draw/select an AOI, set clip options, and run the clip.<disabledText /></tooltip>
         </button>
       </controls>
+
+      <dockPanes>
+        <dockPane id="KylidarAddin_Dockpane" caption="Kylidar" className="KylidarDockpaneViewModel" dock="group" dockWith="esri_core_projectDockPane">
+          <content className="KylidarDockpaneView" />
+        </dockPane>
+      </dockPanes>
 
     </insertModule>
   </modules>

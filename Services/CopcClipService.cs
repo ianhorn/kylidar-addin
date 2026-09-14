@@ -41,8 +41,16 @@ namespace KylidarAddin.Services
             if (!(working is Polygon) && bufferFeet <= 0)
                 throw new InvalidOperationException("A buffer is required unless the AOI is already a polygon.");
 
-            var wgs84 = (Geometry)GeometryEngine.Instance.Project(working, SpatialReferences.WGS84);
-            return (GeoJsonConverter.ToGeoJsonGeometry(wgs84), GeoJsonConverter.ToWkt(wgs84), working);
+            if (working is Polygon workingPoly)
+                progress?.Report($"Buffered AOI: {workingPoly.PointCount} vertex/vertices, area {workingPoly.Area:F2} (sq. map units).");
+
+            // Search the STAC catalog with the AOI exactly as drawn (point stays a point, line
+            // stays a line) -- "which tiles touch this location" doesn't need padding. The buffer
+            // only widens the region PDAL crops to afterward, so it's applied to the crop
+            // geometry (wkt/bufferedAoi) but not to what's sent as the STAC "intersects" geometry.
+            var searchWgs84 = (Geometry)GeometryEngine.Instance.Project(aoi, SpatialReferences.WGS84);
+            var cropWgs84 = (Geometry)GeometryEngine.Instance.Project(working, SpatialReferences.WGS84);
+            return (GeoJsonConverter.ToGeoJsonGeometry(searchWgs84), GeoJsonConverter.ToWkt(cropWgs84), working);
         }
 
         public static async Task<ClipResult> ClipToAoiAsync(
@@ -62,7 +70,7 @@ namespace KylidarAddin.Services
                         tiles.Add((item, asset));
 
                 if (tiles.Count == 0)
-                    return new ClipResult { Success = false, Error = "No LiDAR coverage found for this AOI in the selected phase(s)." };
+                    return new ClipResult { Success = false, Error = "No LiDAR coverage found for this AOI in the selected phase(s). Try a different phase or a new AOI." };
 
                 progress?.Report($"Found {tiles.Count} LiDAR tile(s) intersecting the AOI.");
 
@@ -154,6 +162,7 @@ namespace KylidarAddin.Services
                 const double metersPerFoot = 0.3048006096;
                 var metersPerSrUnit = sr.Unit.ConversionFactor; // SR unit -> meters
                 distanceInSrUnits = (bufferFeet * metersPerFoot) / metersPerSrUnit;
+                progress?.Report($"Buffering {bufferFeet} ft in {sr.Name} ({sr.Unit.Name}, {metersPerSrUnit} m/unit) = {distanceInSrUnits} map units.");
             }
             else
             {
@@ -164,7 +173,9 @@ namespace KylidarAddin.Services
                 var webMercator = SpatialReferenceBuilder.CreateSpatialReference(3857);
                 var projected = GeometryEngine.Instance.Project(geometry, webMercator);
                 const double metersPerFoot = 0.3048006096;
-                var buffered = GeometryEngine.Instance.Buffer(projected, bufferFeet * metersPerFoot);
+                var bufferMeters = bufferFeet * metersPerFoot;
+                progress?.Report($"Buffering {bufferFeet} ft = {bufferMeters} m in Web Mercator.");
+                var buffered = GeometryEngine.Instance.Buffer(projected, bufferMeters);
                 return buffered;
             }
 

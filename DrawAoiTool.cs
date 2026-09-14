@@ -6,6 +6,7 @@
  * the constructor) -- this is the reliable Pro SDK pattern: a single tool instance with a
  * dynamically-changed SketchType does not switch sketch behavior.
  */
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -18,29 +19,42 @@ using ArcGIS.Desktop.Mapping;
 
 namespace KylidarAddin
 {
-    /// <summary>Holds the most recently sketched AOI geometry, in its original map spatial reference.</summary>
+    /// <summary>
+    /// Holds the most recently sketched/selected AOI geometry, in its original map spatial
+    /// reference, plus a short human-readable description. Raises <see cref="Changed"/> so the
+    /// Kylidar dock pane can update its status line without a MessageBox popup.
+    /// </summary>
     internal static class AoiState
     {
-        public static Geometry Current { get; set; }
+        public static Geometry Current { get; private set; }
+        public static string Description { get; private set; }
+        public static event EventHandler Changed;
+
+        public static void Set(Geometry geometry, string description)
+        {
+            Current = geometry;
+            Description = description;
+            Changed?.Invoke(null, EventArgs.Empty);
+        }
     }
 
     internal abstract class DrawAoiToolBase : MapTool
     {
-        protected DrawAoiToolBase(SketchGeometryType sketchType) : base()
+        private readonly string _aoiLabel;
+
+        protected DrawAoiToolBase(SketchGeometryType sketchType, string aoiLabel) : base()
         {
             IsSketchTool = true;
             SketchType = sketchType;
             SketchOutputMode = SketchOutputMode.Map; // geometry in map coordinates
+            _aoiLabel = aoiLabel;
         }
 
         protected override Task<bool> OnSketchCompleteAsync(Geometry geometry)
         {
             if (geometry == null) return Task.FromResult(false);
 
-            AoiState.Current = geometry;
-            MessageBox.Show("AOI captured. Use \"Clip LiDAR to AOI\" to search and clip.",
-                "Kylidar", MessageBoxButton.OK, MessageBoxImage.Information);
-
+            AoiState.Set(geometry, _aoiLabel);
             return Task.FromResult(true);
         }
     }
@@ -48,19 +62,19 @@ namespace KylidarAddin
     internal class DrawPointAoiTool : DrawAoiToolBase
     {
         public const string ToolId = "KylidarAddin_DrawPointAoiTool";
-        public DrawPointAoiTool() : base(SketchGeometryType.Point) { }
+        public DrawPointAoiTool() : base(SketchGeometryType.Point, "Point AOI") { }
     }
 
     internal class DrawLineAoiTool : DrawAoiToolBase
     {
         public const string ToolId = "KylidarAddin_DrawLineAoiTool";
-        public DrawLineAoiTool() : base(SketchGeometryType.Line) { }
+        public DrawLineAoiTool() : base(SketchGeometryType.Line, "Line AOI") { }
     }
 
     internal class DrawPolygonAoiTool : DrawAoiToolBase
     {
         public const string ToolId = "KylidarAddin_DrawPolygonAoiTool";
-        public DrawPolygonAoiTool() : base(SketchGeometryType.Polygon) { }
+        public DrawPolygonAoiTool() : base(SketchGeometryType.Polygon, "Polygon AOI") { }
     }
 
     /// <summary>
@@ -86,13 +100,13 @@ namespace KylidarAddin
             Mouse.OverrideCursor = Cursors.Wait;
             try
             {
-                var (ok, unioned) = await QueuedTask.Run(() =>
+                var (ok, unioned, count) = await QueuedTask.Run(() =>
                 {
                     var mapView = MapView.Active;
-                    if (mapView == null) return (false, (Geometry)null);
+                    if (mapView == null) return (false, (Geometry)null, 0);
 
                     var selection = mapView.SelectFeatures(geometry, SelectionCombinationMethod.New);
-                    if (selection.Count == 0) return (false, (Geometry)null);
+                    if (selection.Count == 0) return (false, (Geometry)null, 0);
 
                     var mapSr = mapView.Map.SpatialReference;
                     var shapes = new List<Geometry>();
@@ -112,7 +126,7 @@ namespace KylidarAddin
                         }
                     }
 
-                    if (shapes.Count == 0) return (false, (Geometry)null);
+                    if (shapes.Count == 0) return (false, (Geometry)null, 0);
 
                     // Union requires matching geometry dimension (point/multipoint vs polyline vs
                     // polygon/envelope) -- batch-union within each dimension group (fast, one native
@@ -122,7 +136,7 @@ namespace KylidarAddin
                         .Select(g => g.Count() == 1 ? g.First() : GeometryEngine.Instance.Union(g))
                         .Aggregate((a, b) => GeometryEngine.Instance.Union(a, b));
 
-                    return (true, result);
+                    return (true, result, shapes.Count);
                 });
 
                 if (!ok)
@@ -132,9 +146,7 @@ namespace KylidarAddin
                     return false;
                 }
 
-                AoiState.Current = unioned;
-                MessageBox.Show("AOI captured from selected feature(s). Use \"Clip LiDAR to AOI\" to search and clip.",
-                    "Kylidar", MessageBoxButton.OK, MessageBoxImage.Information);
+                AoiState.Set(unioned, $"AOI from {count} selected feature(s)");
                 return true;
             }
             finally
