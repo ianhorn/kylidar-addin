@@ -28,3 +28,8 @@ aprx*
 *.log
 
 *.gdb
+
+# MkDocs build output (docs_dir is docs-src/, site_dir is docs/) and local virtualenv. The
+# GitHub Actions workflow (.github/workflows/docs.yml) builds and deploys docs/ to GitHub
+# Pages -- it's never committed.
+docs/

@@ -1,0 +1,67 @@
+site_name: Kylidar Add-in
+site_description: ArcGIS Pro add-in for clipping Kentucky From Above LiDAR point-cloud data to an area of interest.
+site_author: Kylidar
+site_url: https://ianhorn.github.io/kylidar-addin/
+repo_url: https://github.com/ianhorn/kylidar-addin
+repo_name: ianhorn/kylidar-addin
+edit_uri: edit/main/docs-src/
+
+# Markdown source lives in docs-src/; built HTML goes to docs/, which the GitHub Actions
+# workflow (.github/workflows/docs.yml) uploads as the Pages artifact on every push. docs/ is
+# gitignored -- it's CI build output only, never committed.
+docs_dir: docs-src
+site_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Getting Started: getting-started.md
+  - Area of Interest: area-of-interest.md
+  - Clip Settings & Running: clip-and-run.md
+  - Troubleshooting: troubleshooting.md
