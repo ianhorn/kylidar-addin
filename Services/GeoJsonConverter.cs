@@ -1,22 +1,22 @@
 /*
  * Converts an ArcGIS.Core.Geometry geometry (projected to WGS84 / CRS84) to a GeoJSON geometry
- * string suitable for the STAC 'intersects' parameter, and to WKT for PDAL's crop "polygon"
- * reader option. Handles MapPoint (Point), Polyline (LineString/MultiLineString), and Polygon
- * (Polygon/MultiPolygon).
+ * string suitable for the STAC 'intersects' parameter, and (separately) to per-part WKT strings
+ * used to crop tiles to the AOI via PDAL (see CopcClipService/ExportScriptService).
  *
- * A "select feature" AOI (union of one or more selected features, see SelectFeatureAoiTool) can
- * come back multi-part -- e.g. two disjoint polygon pieces from unioning non-adjacent features.
- * Flattening every ring/path into a single ring (the old approach) produces a self-intersecting,
- * geometrically invalid shape once there's more than one part, which STAC/PDAL then reject. So
- * every part is split out via GeometryEngine.Instance.MultipartToSinglePart first, and the result
- * is emitted as MultiPolygon/MultiLineString when there's more than one. Note: for a polygon with
- * actual holes, MultipartToSinglePart treats each ring (exterior or hole) as its own part, so a
- * hole would come out as an extra polygon piece rather than a subtracted hole -- an acceptable
- * simplification for a LiDAR clip AOI, where holes are not a realistic case.
+ * A "select feature" AOI (union of one or more selected features, see SelectFeatureAoiTool), or a
+ * buffered point/line AOI, can come back multi-part -- e.g. two disjoint polygon pieces from
+ * unioning non-adjacent features. Flattening every ring/path into a single ring (the old approach)
+ * produces a self-intersecting, geometrically invalid shape once there's more than one part, which
+ * both STAC and PDAL then reject. So every part is split out via
+ * GeometryEngine.Instance.MultipartToSinglePart first: GeoJSON output is emitted as
+ * MultiPolygon/MultiLineString when there's more than one part (STAC's "intersects" search is fine
+ * with that), and WKT output is emitted as a separate POLYGON string per part (PDAL's own handling
+ * of multi-part crop regions -- see CopcClipService -- expects that instead of one combined
+ * MULTIPOLYGON string, which readers.copc's "polygon" option rejects as "geometrically invalid").
  */
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
 using ArcGIS.Core.Geometry;
@@ -39,6 +39,48 @@ namespace KylidarAddin.Services
                 writer.Flush();
             }
             return Encoding.UTF8.GetString(ms.ToArray());
+        }
+
+        /// <summary>
+        /// Convert a (possibly multi-part) polygon to one WKT "POLYGON(...)" string per part, for
+        /// PDAL's crop options. The geometry should already be projected to WGS84 (lon/lat), same
+        /// as ToGeoJsonGeometry. Non-polygon input (shouldn't happen -- AOIs are always buffered to
+        /// a polygon before cropping, see CopcClipService.PrepareAoi) returns an empty list.
+        /// </summary>
+        public static IReadOnlyList<string> ToWktParts(Geometry geometry)
+        {
+            if (geometry is not Polygon poly) return System.Array.Empty<string>();
+            var parts = GeometryEngine.Instance.MultipartToSinglePart(poly);
+            var result = new List<string>(parts.Count);
+            foreach (var part in parts)
+                if (part is Polygon p) result.Add(PolygonToWkt(p));
+            return result;
+        }
+
+        private static string PolygonToWkt(Polygon poly)
+        {
+            var sb = new StringBuilder("POLYGON((");
+            AppendPositions(sb, poly.Copy2DCoordinatesToList(), closeRing: true);
+            sb.Append("))");
+            return sb.ToString();
+        }
+
+        private static void AppendPositions(StringBuilder sb, IReadOnlyList<Coordinate2D> coords, bool closeRing)
+        {
+            for (int i = 0; i < coords.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(coords[i].X.ToString(CultureInfo.InvariantCulture));
+                sb.Append(' ');
+                sb.Append(coords[i].Y.ToString(CultureInfo.InvariantCulture));
+            }
+            if (closeRing && coords.Count > 0)
+            {
+                sb.Append(", ");
+                sb.Append(coords[0].X.ToString(CultureInfo.InvariantCulture));
+                sb.Append(' ');
+                sb.Append(coords[0].Y.ToString(CultureInfo.InvariantCulture));
+            }
         }
 
         private static void WriteGeometry(Utf8JsonWriter w, Geometry g)
@@ -143,65 +185,6 @@ namespace KylidarAddin.Services
             w.WriteStartArray();
             WritePositions(w, coords, closeRing);
             w.WriteEndArray();
-        }
-
-        /// <summary>
-        /// Convert a geometry to a WKT string (used for PDAL's crop "polygon" reader option).
-        /// The geometry should already be projected to WGS84 (lon/lat).
-        /// </summary>
-        public static string ToWkt(Geometry geometry)
-        {
-            if (geometry == null) return null;
-            switch (geometry)
-            {
-                case Polygon poly:
-                {
-                    var rings = SinglePartRings(poly);
-                    if (rings.Count == 1)
-                        return $"POLYGON(({RingToWkt(rings[0])}))";
-
-                    var groups = rings.Select(r => $"(({RingToWkt(r)}))");
-                    return $"MULTIPOLYGON({string.Join(",", groups)})";
-                }
-                case Polyline line:
-                {
-                    var paths = SinglePartPaths(line);
-                    if (paths.Count == 1)
-                        return $"LINESTRING({PositionsToWkt(paths[0])})";
-
-                    var groups = paths.Select(p => $"({PositionsToWkt(p)})");
-                    return $"MULTILINESTRING({string.Join(",", groups)})";
-                }
-                case MapPoint p:
-                    return $"POINT({p.X} {p.Y})";
-                default:
-                    return null;
-            }
-        }
-
-        private static string RingToWkt(IReadOnlyList<Coordinate2D> coords)
-        {
-            var sb = new StringBuilder();
-            AppendPositions(sb, coords);
-            if (coords.Count > 0)
-                sb.Append(", ").Append(coords[0].X).Append(' ').Append(coords[0].Y);
-            return sb.ToString();
-        }
-
-        private static string PositionsToWkt(IReadOnlyList<Coordinate2D> coords)
-        {
-            var sb = new StringBuilder();
-            AppendPositions(sb, coords);
-            return sb.ToString();
-        }
-
-        private static void AppendPositions(StringBuilder sb, IReadOnlyList<Coordinate2D> coords)
-        {
-            for (int i = 0; i < coords.Count; i++)
-            {
-                if (i > 0) sb.Append(", ");
-                sb.Append(coords[i].X).Append(' ').Append(coords[i].Y);
-            }
         }
 
         /// <summary>Split a (possibly multi-part) polygon into each part's own ring of 2D coordinates.</summary>

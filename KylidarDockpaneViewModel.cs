@@ -1,21 +1,33 @@
 /*
- * Dock pane view model: hosts the AOI tool launchers, clip settings, run/cancel, progress log,
- * and post-run "add to LAS dataset" follow-up that used to live on the ribbon tab and in the
- * BufferInputDialog/ProgressDialog modal windows. See ClipLidarButton's former OnClick for the
- * run/cancel/LAS-dataset logic this was moved from.
+ * Dock pane view model: hosts the AOI tool launchers, LiDAR phase selection, a catalog-search
+ * preview, output mode (download raw COPC files only / convert to .las keeping the raw COPCs /
+ * convert discarding them -- always as individual per-tile files, no merge option -- optionally
+ * cropped to the drawn/selected AOI, see below), LAS dataset disposition (none/create/add-to-
+ * existing + pyramids), run/cancel, an "Export Script" alternative to Run that writes a stand-alone
+ * download/convert kit instead of running here (see ExportScriptService), and the progress log.
+ * The output/dataset choices are all made up front, before Run, rather than prompted for afterward
+ * -- RunAsync executes the whole chosen pipeline in one pass.
+ *
+ * "Clip to area of interest" crops each tile to the AOI (plus a required buffer -- see
+ * CopcClipService.PrepareAoi for why a buffer is required even for polygon AOIs) during
+ * conversion; it only affects the two convert output modes, since the "download COPC only" mode
+ * never runs PDAL. A drawn/selected polygon AOI with holes, gaps, or islands can make PDAL's crop
+ * step fail (see ShowAoiClipComplexityWarning) -- this is inherent to how PDAL's crop filter/reader
+ * option handle multi-part polygons, not something this add-in can fully paper over.
  */
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
 using System.Windows.Input;
 using ArcGIS.Core.Geometry;
 using ArcGIS.Desktop.Framework;
 using ArcGIS.Desktop.Framework.Contracts;
 using ArcGIS.Desktop.Framework.Threading.Tasks;
+using ArcGIS.Desktop.Mapping;
 using KylidarAddin.Services;
 using Microsoft.Win32;
 
@@ -59,7 +71,16 @@ namespace KylidarAddin
             AoiStatusText = AoiState.Current == null
                 ? "No AOI yet -- draw or select one below."
                 : $"AOI ready: {AoiState.Description}";
+            IsPolygonAoi = AoiState.Current is Polygon;
+            NotifyPropertyChanged(nameof(ShowAoiClipComplexityWarning));
+            NotifyPropertyChanged(nameof(ShowBufferRequiredWarning));
+            CommandManager.InvalidateRequerySuggested();
         }
+
+        private bool _isPolygonAoi;
+        /// <summary>Whether the current AOI is a polygon (drawn or from Select Feature) -- backs
+        /// ShowAoiClipComplexityWarning, since only polygon AOIs can have holes/gaps/islands.</summary>
+        public bool IsPolygonAoi { get => _isPolygonAoi; set => SetProperty(ref _isPolygonAoi, value); }
 
         private static async void ActivateTool(string toolId) => await FrameworkApplication.SetCurrentToolAsync(toolId);
 
@@ -67,17 +88,19 @@ namespace KylidarAddin
         public ICommand DrawLineCommand => new RelayCommand(() => ActivateTool(DrawLineAoiTool.ToolId));
         public ICommand DrawPolygonCommand => new RelayCommand(() => ActivateTool(DrawPolygonAoiTool.ToolId));
         public ICommand SelectFeatureCommand => new RelayCommand(() => ActivateTool(SelectFeatureAoiTool.ToolId));
+        public ICommand ClearAoiCommand => new RelayCommand(ClearAoi, () => AoiState.Current != null);
+
+        private static async void ClearAoi()
+        {
+            AoiState.Clear();
+            var mapView = MapView.Active;
+            if (mapView?.Map != null)
+                await QueuedTask.Run(() => mapView.Map.SetSelection(null));
+        }
 
         #endregion
 
-        #region Clip settings
-
-        private string _bufferFeetText = "0";
-        public string BufferFeetText
-        {
-            get => _bufferFeetText;
-            set => SetProperty(ref _bufferFeetText, value);
-        }
+        #region LiDAR phase selection
 
         private bool _phase1;
         public bool Phase1 { get => _phase1; set => SetProperty(ref _phase1, value); }
@@ -88,22 +111,270 @@ namespace KylidarAddin
         private bool _phase3;
         public bool Phase3 { get => _phase3; set => SetProperty(ref _phase3, value); }
 
-        private string _outputLasPath = DefaultOutputPath();
-        public string OutputLasPath
+        #endregion
+
+        #region Catalog search (preview only -- Run always does its own fresh search/download)
+
+        private int _foundTileCount;
+        public int FoundTileCount
         {
-            get => _outputLasPath;
-            set => SetProperty(ref _outputLasPath, value);
+            get => _foundTileCount;
+            set
+            {
+                SetProperty(ref _foundTileCount, value);
+                NotifyPropertyChanged(nameof(DownloadCopcOnlyLabel));
+            }
         }
 
-        private static string DefaultOutputPath() =>
-            Path.Combine(Path.GetTempPath(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}.las");
+        public string DownloadCopcOnlyLabel => FoundTileCount > 0
+            ? $"Download {FoundTileCount} COPC file(s) only"
+            : "Download COPC files only";
 
-        public ICommand BrowseOutputCommand => new RelayCommand(BrowseOutput);
-
-        private void BrowseOutput()
+        private string _catalogSearchStatusText = string.Empty;
+        public string CatalogSearchStatusText
         {
-            var dlg = new SaveFileDialog { Filter = "LAS files (*.las)|*.las", FileName = Path.GetFileName(OutputLasPath) };
-            if (dlg.ShowDialog() == true) OutputLasPath = dlg.FileName;
+            get => _catalogSearchStatusText;
+            set => SetProperty(ref _catalogSearchStatusText, value);
+        }
+
+        private bool _isSearching;
+        public bool IsSearching
+        {
+            get => _isSearching;
+            set => SetProperty(ref _isSearching, value);
+        }
+
+        public ICommand SearchCatalogCommand => new RelayCommand(async () => await SearchCatalogAsync(), CanSearchCatalog);
+
+        private bool CanSearchCatalog() => !IsRunning && !IsSearching;
+
+        private async Task SearchCatalogAsync()
+        {
+            if (AoiState.Current == null)
+            {
+                CatalogSearchStatusText = "Draw an AOI (point, line, or polygon) or select a feature first.";
+                return;
+            }
+
+            var collections = new List<string>();
+            if (Phase1) collections.Add("laz-phase1");
+            if (Phase2) collections.Add("laz-phase2");
+            if (Phase3) collections.Add("laz-phase3");
+            if (collections.Count == 0)
+            {
+                CatalogSearchStatusText = "Select at least one LiDAR phase.";
+                return;
+            }
+
+            IsSearching = true;
+            CatalogSearchStatusText = "Searching STAC catalog...";
+            try
+            {
+                var aoi = AoiState.Current;
+                var bufferFeet = TryGetBufferFeet(out var bf) ? bf : 0;
+                var clipToAoi = ClipToAoi;
+                var aoiInfo = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, clipToAoi, bufferFeet));
+                var count = await CopcClipService.SearchTileCountAsync(aoiInfo.GeoJson, collections);
+                FoundTileCount = count;
+                CatalogSearchStatusText = count == 0
+                    ? "No LiDAR coverage found for this AOI in the selected phase(s)."
+                    : $"Found {count} LiDAR tile(s) intersecting the AOI.";
+            }
+            catch (Exception ex)
+            {
+                CatalogSearchStatusText = "Search failed: " + ex.Message;
+            }
+            finally
+            {
+                IsSearching = false;
+            }
+        }
+
+        #endregion
+
+        #region Output settings
+
+        public enum OutputMode { DownloadCopcOnly, ConvertKeepCopc, ConvertDiscardCopc }
+
+        private OutputMode _outputMode = OutputMode.ConvertDiscardCopc;
+        public OutputMode SelectedOutputMode
+        {
+            get => _outputMode;
+            set
+            {
+                SetProperty(ref _outputMode, value);
+                NotifyPropertyChanged(nameof(IsDownloadCopcOnlySelected));
+                NotifyPropertyChanged(nameof(IsConvertKeepCopcSelected));
+                NotifyPropertyChanged(nameof(IsConvertDiscardCopcSelected));
+            }
+        }
+
+        // Checkbox-styled stand-ins for a radio group: checking one selects that OutputMode;
+        // unchecking (the false branch) is a no-op other than re-raising PropertyChanged so the
+        // checkbox snaps back to checked -- a checkbox has no "nothing selected" state to fall back
+        // to here, unlike a real CheckBox used for an independent yes/no setting.
+        public bool IsDownloadCopcOnlySelected
+        {
+            get => SelectedOutputMode == OutputMode.DownloadCopcOnly;
+            set { if (value) SelectedOutputMode = OutputMode.DownloadCopcOnly; else NotifyPropertyChanged(nameof(IsDownloadCopcOnlySelected)); }
+        }
+
+        public bool IsConvertKeepCopcSelected
+        {
+            get => SelectedOutputMode == OutputMode.ConvertKeepCopc;
+            set { if (value) SelectedOutputMode = OutputMode.ConvertKeepCopc; else NotifyPropertyChanged(nameof(IsConvertKeepCopcSelected)); }
+        }
+
+        public bool IsConvertDiscardCopcSelected
+        {
+            get => SelectedOutputMode == OutputMode.ConvertDiscardCopc;
+            set { if (value) SelectedOutputMode = OutputMode.ConvertDiscardCopc; else NotifyPropertyChanged(nameof(IsConvertDiscardCopcSelected)); }
+        }
+
+        private bool _clipToAoi;
+        /// <summary>Off by default -- clipping is the exception, not the default, and needing a
+        /// buffer before Run/Export Script re-enable (see HasRequiredBufferForClip) would otherwise
+        /// surprise anyone who just wants the full tiles.</summary>
+        public bool ClipToAoi
+        {
+            get => _clipToAoi;
+            set
+            {
+                SetProperty(ref _clipToAoi, value);
+                NotifyPropertyChanged(nameof(ShowBufferSettings));
+                NotifyPropertyChanged(nameof(ShowBufferRequiredWarning));
+                NotifyPropertyChanged(nameof(ShowAoiClipComplexityWarning));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+
+        public bool ShowBufferSettings => ClipToAoi;
+
+        private string _bufferFeetText = string.Empty;
+        public string BufferFeetText
+        {
+            get => _bufferFeetText;
+            set
+            {
+                SetProperty(ref _bufferFeetText, value);
+                NotifyPropertyChanged(nameof(ShowBufferRequiredWarning));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+
+        private bool TryGetBufferFeet(out double feet) =>
+            double.TryParse(BufferFeetText, out feet) && feet > 0;
+
+        /// <summary>
+        /// A buffer is required when clipping a point or line AOI -- neither has any area to crop
+        /// by without one. A polygon AOI already has an area, so its buffer is optional (0/empty
+        /// clips to the polygon's own boundary). Backs the Run/Export Script safety disable below.
+        /// </summary>
+        public bool HasRequiredBufferForClip => !ClipToAoi || IsPolygonAoi || TryGetBufferFeet(out _);
+
+        public bool ShowBufferRequiredWarning => ClipToAoi && !HasRequiredBufferForClip;
+
+        /// <summary>Warns that a polygon AOI (drawn or from Select Feature) with holes, gaps, or
+        /// islands can make PDAL's crop step error -- only relevant once clipping is turned on.</summary>
+        public bool ShowAoiClipComplexityWarning => ClipToAoi && IsPolygonAoi;
+
+        private string _outputFolder = DefaultOutputFolder();
+        public string OutputFolder
+        {
+            get => _outputFolder;
+            set => SetProperty(ref _outputFolder, value);
+        }
+
+        private static string DefaultOutputFolder() =>
+            Path.Combine(Path.GetTempPath(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}");
+
+        public ICommand BrowseOutputFolderCommand => new RelayCommand(BrowseOutputFolder);
+
+        private void BrowseOutputFolder()
+        {
+            var dlg = new OpenFolderDialog { FolderName = OutputFolder };
+            if (dlg.ShowDialog() == true) OutputFolder = dlg.FolderName;
+        }
+
+        #endregion
+
+        #region LAS dataset settings
+
+        public enum DatasetAction { None, CreateNew, AddExisting }
+
+        private DatasetAction _selectedDatasetAction = DatasetAction.None;
+        public DatasetAction SelectedDatasetAction
+        {
+            get => _selectedDatasetAction;
+            set
+            {
+                SetProperty(ref _selectedDatasetAction, value);
+                NotifyPropertyChanged(nameof(ShowNewDatasetPath));
+                NotifyPropertyChanged(nameof(ShowExistingDatasetPath));
+                NotifyPropertyChanged(nameof(CanBuildPyramids));
+                NotifyPropertyChanged(nameof(IsDatasetActionNoneSelected));
+                NotifyPropertyChanged(nameof(IsDatasetActionCreateNewSelected));
+                NotifyPropertyChanged(nameof(IsDatasetActionAddExistingSelected));
+            }
+        }
+
+        public bool ShowNewDatasetPath => SelectedDatasetAction == DatasetAction.CreateNew;
+        public bool ShowExistingDatasetPath => SelectedDatasetAction == DatasetAction.AddExisting;
+        public bool CanBuildPyramids => SelectedDatasetAction != DatasetAction.None;
+
+        // Checkbox-styled stand-ins for a radio group -- see IsDownloadCopcOnlySelected etc. above
+        // for why unchecking is a no-op rather than clearing the selection.
+        public bool IsDatasetActionNoneSelected
+        {
+            get => SelectedDatasetAction == DatasetAction.None;
+            set { if (value) SelectedDatasetAction = DatasetAction.None; else NotifyPropertyChanged(nameof(IsDatasetActionNoneSelected)); }
+        }
+
+        public bool IsDatasetActionCreateNewSelected
+        {
+            get => SelectedDatasetAction == DatasetAction.CreateNew;
+            set { if (value) SelectedDatasetAction = DatasetAction.CreateNew; else NotifyPropertyChanged(nameof(IsDatasetActionCreateNewSelected)); }
+        }
+
+        public bool IsDatasetActionAddExistingSelected
+        {
+            get => SelectedDatasetAction == DatasetAction.AddExisting;
+            set { if (value) SelectedDatasetAction = DatasetAction.AddExisting; else NotifyPropertyChanged(nameof(IsDatasetActionAddExistingSelected)); }
+        }
+
+        private string _newDatasetPath = DefaultNewDatasetPath();
+        public string NewDatasetPath
+        {
+            get => _newDatasetPath;
+            set => SetProperty(ref _newDatasetPath, value);
+        }
+
+        private string _existingDatasetPath = string.Empty;
+        public string ExistingDatasetPath
+        {
+            get => _existingDatasetPath;
+            set => SetProperty(ref _existingDatasetPath, value);
+        }
+
+        private bool _buildPyramids;
+        public bool BuildPyramids { get => _buildPyramids; set => SetProperty(ref _buildPyramids, value); }
+
+        private static string DefaultNewDatasetPath() =>
+            Path.Combine(Path.GetTempPath(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}.lasd");
+
+        public ICommand BrowseNewDatasetCommand => new RelayCommand(BrowseNewDataset);
+        public ICommand BrowseExistingDatasetCommand => new RelayCommand(BrowseExistingDataset);
+
+        private void BrowseNewDataset()
+        {
+            var dlg = new SaveFileDialog { Filter = "LAS Dataset (*.lasd)|*.lasd", FileName = Path.GetFileName(NewDatasetPath) };
+            if (dlg.ShowDialog() == true) NewDatasetPath = dlg.FileName;
+        }
+
+        private void BrowseExistingDataset()
+        {
+            var dlg = new OpenFileDialog { Filter = "LAS Dataset (*.lasd)|*.lasd" };
+            if (dlg.ShowDialog() == true) ExistingDatasetPath = dlg.FileName;
         }
 
         #endregion
@@ -131,18 +402,95 @@ namespace KylidarAddin
         public ICommand RunCommand => new RelayCommand(async () => await RunAsync(), CanRun);
         public ICommand CancelCommand => new RelayCommand(() => _cts?.Cancel(), () => IsRunning);
 
-        /// <summary>
-        /// A non-polygon AOI (point or line) has no area to search/crop against until it's
-        /// buffered -- matches the guard in CopcClipService.PrepareAoi, but checked up front here
-        /// so Run is disabled instead of failing after a round trip to the STAC API.
-        /// </summary>
-        private bool CanRun()
+        private string _exportScriptStatusText = string.Empty;
+        public string ExportScriptStatusText
         {
-            if (IsRunning) return false;
-            if (AoiState.Current != null && !(AoiState.Current is Polygon))
-                return double.TryParse(BufferFeetText, out var feet) && feet > 0;
-            return true;
+            get => _exportScriptStatusText;
+            set => SetProperty(ref _exportScriptStatusText, value);
         }
+
+        public ICommand ExportScriptCommand => new RelayCommand(async () => await ExportScriptAsync(), CanExportScript);
+
+        private bool CanExportScript() => !IsRunning && !IsSearching && HasRequiredBufferForClip;
+
+        /// <summary>
+        /// Write a stand-alone download/convert script for the AOI's current matching tiles, using
+        /// the same output-mode settings as Run -- for very large batches, running on another
+        /// machine, or scheduling for later. See ExportScriptService's header comment for what it
+        /// does and doesn't reproduce (no LAS dataset step -- that's Pro/arcpy-only).
+        /// </summary>
+        private async Task ExportScriptAsync()
+        {
+            ExportScriptStatusText = string.Empty;
+
+            if (AoiState.Current == null)
+            {
+                ExportScriptStatusText = "Draw an AOI (point, line, or polygon) or select a feature first.";
+                return;
+            }
+
+            var collections = new List<string>();
+            if (Phase1) collections.Add("laz-phase1");
+            if (Phase2) collections.Add("laz-phase2");
+            if (Phase3) collections.Add("laz-phase3");
+            if (collections.Count == 0)
+            {
+                ExportScriptStatusText = "Select at least one LiDAR phase.";
+                return;
+            }
+
+            bool convert = SelectedOutputMode != OutputMode.DownloadCopcOnly;
+            bool discardRaw = SelectedOutputMode == OutputMode.ConvertDiscardCopc;
+
+            var dlg = new ExportScriptDialog(OutputFolder) { Owner = System.Windows.Application.Current?.MainWindow };
+            if (dlg.ShowDialog() != true) { ExportScriptStatusText = "Export cancelled."; return; }
+
+            try
+            {
+                Directory.CreateDirectory(dlg.DestinationFolder);
+            }
+            catch (Exception ex)
+            {
+                ExportScriptStatusText = "Bad destination folder: " + ex.Message;
+                return;
+            }
+
+            ExportScriptStatusText = "Searching STAC catalog...";
+            try
+            {
+                var aoi = AoiState.Current;
+                var bufferFeet = TryGetBufferFeet(out var bf) ? bf : 0;
+                var clipToAoi = ClipToAoi;
+                var aoiInfo = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, clipToAoi, bufferFeet));
+                var tileUrls = await CopcClipService.SearchTileUrlsAsync(aoiInfo.GeoJson, collections);
+                if (tileUrls.Count == 0)
+                {
+                    ExportScriptStatusText = "No LiDAR coverage found for this AOI in the selected phase(s).";
+                    return;
+                }
+
+                var script = ExportScriptService.BuildScript(
+                    dlg.SelectedFormat, tileUrls, dlg.DestinationFolder, convert, discardRaw, aoiInfo.CropWktParts);
+
+                var ext = dlg.SelectedFormat switch
+                {
+                    ExportScriptFormat.Notebook => ".ipynb",
+                    ExportScriptFormat.PowerShell => ".ps1",
+                    ExportScriptFormat.Shell => ".sh",
+                    _ => ".py"
+                };
+                var scriptPath = Path.Combine(dlg.DestinationFolder, $"kylidar_export_{DateTime.Now:yyyyMMdd_HHmmss}{ext}");
+                await File.WriteAllTextAsync(scriptPath, script);
+
+                ExportScriptStatusText = $"Exported {tileUrls.Count}-tile script to {scriptPath}.";
+            }
+            catch (Exception ex)
+            {
+                ExportScriptStatusText = "Could not export script: " + ex.Message;
+            }
+        }
+
+        private bool CanRun() => !IsRunning && !IsSearching && HasRequiredBufferForClip;
 
         private async Task RunAsync()
         {
@@ -151,16 +499,6 @@ namespace KylidarAddin
             if (AoiState.Current == null)
             {
                 ValidationText = "Draw an AOI (point, line, or polygon) or select a feature first.";
-                return;
-            }
-            if (!double.TryParse(BufferFeetText, out var bufferFeet) || bufferFeet < 0)
-            {
-                ValidationText = "Enter a buffer distance of 0 or more.";
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(OutputLasPath))
-            {
-                ValidationText = "Choose an output .las file path.";
                 return;
             }
 
@@ -174,18 +512,44 @@ namespace KylidarAddin
                 return;
             }
 
-            ShowLasDatasetPrompt = false;
+            if (string.IsNullOrWhiteSpace(OutputFolder))
+            {
+                ValidationText = "Choose an output folder.";
+                return;
+            }
+            if (SelectedDatasetAction == DatasetAction.CreateNew && string.IsNullOrWhiteSpace(NewDatasetPath))
+            {
+                ValidationText = "Choose a path for the new LAS dataset.";
+                return;
+            }
+            if (SelectedDatasetAction == DatasetAction.AddExisting && string.IsNullOrWhiteSpace(ExistingDatasetPath))
+            {
+                ValidationText = "Choose the existing LAS dataset to add to.";
+                return;
+            }
+
             LogLines.Clear();
             IsRunning = true;
             _cts = new CancellationTokenSource();
             var progress = new Progress<string>(msg => LogLines.Add(msg));
+            var runStopwatch = Stopwatch.StartNew();
 
             ClipResult result = null;
             try
             {
                 var aoi = AoiState.Current;
-                var (geoJson, wkt, bufferedAoi) = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, bufferFeet, progress));
-                result = await CopcClipService.ClipToAoiAsync(geoJson, wkt, bufferedAoi, collections, OutputLasPath, progress, _cts.Token);
+                var bufferFeet = TryGetBufferFeet(out var bf) ? bf : 0;
+                var clipToAoi = ClipToAoi;
+                var aoiInfo = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, clipToAoi, bufferFeet));
+                if (SelectedOutputMode == OutputMode.DownloadCopcOnly)
+                {
+                    result = await CopcClipService.DownloadTilesOnlyAsync(aoiInfo.GeoJson, collections, OutputFolder, progress, _cts.Token);
+                }
+                else
+                {
+                    bool keepRawCopc = SelectedOutputMode == OutputMode.ConvertKeepCopc;
+                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, collections, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, progress, _cts.Token);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -201,63 +565,73 @@ namespace KylidarAddin
                 _cts = null;
             }
 
-            if (result == null) return;
+            if (result == null)
+            {
+                LogLines.Add($"Total time: {FormatDuration(runStopwatch.Elapsed)}");
+                return;
+            }
 
             if (!result.Success)
             {
                 LogLines.Add("Failed: " + result.Error);
+                LogLines.Add($"Total time: {FormatDuration(runStopwatch.Elapsed)}");
                 return;
             }
 
-            LogLines.Add("Done: " + result.OutputLasPath);
-            _lastOutputLasPath = result.OutputLasPath;
-            ShowLasDatasetPrompt = true;
+            var lasFolderMsg = SelectedOutputMode == OutputMode.ConvertKeepCopc
+                ? Path.Combine(OutputFolder, "LAS")
+                : OutputFolder;
+            LogLines.Add($"Done: {result.OutputPaths.Count} file(s) written to {lasFolderMsg} ({FormatDuration(runStopwatch.Elapsed)} so far).");
+
+            await AddToLasDatasetAsync(result.OutputPaths, progress);
+
+            LogLines.Add($"Total time: {FormatDuration(runStopwatch.Elapsed)}");
         }
 
-        #endregion
+        private static string FormatDuration(TimeSpan elapsed) =>
+            elapsed.TotalMinutes >= 1 ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s" : $"{elapsed.TotalSeconds:F1}s";
 
-        #region Post-run: add to LAS dataset
-
-        private string _lastOutputLasPath;
-
-        private bool _showLasDatasetPrompt;
-        public bool ShowLasDatasetPrompt
+        /// <summary>
+        /// Post-clip dataset step, now chosen up front (SelectedDatasetAction/BuildPyramids)
+        /// instead of prompted for after the clip finishes.
+        /// </summary>
+        private async Task AddToLasDatasetAsync(IReadOnlyList<string> lasPaths, IProgress<string> progress)
         {
-            get => _showLasDatasetPrompt;
-            set => SetProperty(ref _showLasDatasetPrompt, value);
-        }
+            if (SelectedDatasetAction == DatasetAction.None) return;
 
-        public ICommand CreateNewLasDatasetCommand => new RelayCommand(async () => await CreateNewLasDatasetAsync());
-        public ICommand AddToExistingLasDatasetCommand => new RelayCommand(async () => await AddToExistingLasDatasetAsync());
-
-        private async Task CreateNewLasDatasetAsync()
-        {
-            var dlg = new SaveFileDialog
+            var datasetStopwatch = Stopwatch.StartNew();
+            var lasList = string.Join(";", lasPaths);
+            string datasetPath;
+            bool ok;
+            if (SelectedDatasetAction == DatasetAction.CreateNew)
             {
-                Filter = "LAS Dataset (*.lasd)|*.lasd",
-                FileName = Path.GetFileNameWithoutExtension(_lastOutputLasPath) + ".lasd"
-            };
-            if (dlg.ShowDialog() != true) return;
+                datasetPath = NewDatasetPath;
+                ok = await LasDatasetService.CreateLasDatasetAsync(lasList, datasetPath, progress);
+            }
+            else
+            {
+                datasetPath = ExistingDatasetPath;
+                ok = await LasDatasetService.AddFilesToLasDatasetAsync(datasetPath, lasList, progress);
+            }
 
-            var progress = new Progress<string>(msg => LogLines.Add(msg));
-            var ok = await LasDatasetService.CreateLasDatasetAsync(_lastOutputLasPath, dlg.FileName, progress);
-            if (ok) await LasDatasetService.AddToMapAsync(dlg.FileName);
-            else MessageBox.Show("Failed to create the LAS dataset.", "Kylidar", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (!ok)
+            {
+                LogLines.Add("Failed to " + (SelectedDatasetAction == DatasetAction.CreateNew ? "create" : "update") + " the LAS dataset.");
+                return;
+            }
+            LogLines.Add($"LAS dataset {(SelectedDatasetAction == DatasetAction.CreateNew ? "created" : "updated")} ({FormatDuration(datasetStopwatch.Elapsed)}).");
 
-            ShowLasDatasetPrompt = false;
-        }
+            if (BuildPyramids)
+            {
+                LogLines.Add("Building LAS dataset pyramids...");
+                var pyramidStopwatch = Stopwatch.StartNew();
+                if (!await LasDatasetService.BuildPyramidsAsync(datasetPath, progress))
+                    LogLines.Add("Failed to build LAS dataset pyramids.");
+                else
+                    LogLines.Add($"Pyramids built ({FormatDuration(pyramidStopwatch.Elapsed)}).");
+            }
 
-        private async Task AddToExistingLasDatasetAsync()
-        {
-            var dlg = new OpenFileDialog { Filter = "LAS Dataset (*.lasd)|*.lasd" };
-            if (dlg.ShowDialog() != true) return;
-
-            var progress = new Progress<string>(msg => LogLines.Add(msg));
-            var ok = await LasDatasetService.AddFilesToLasDatasetAsync(dlg.FileName, _lastOutputLasPath, progress);
-            if (ok) await LasDatasetService.AddToMapAsync(dlg.FileName);
-            else MessageBox.Show("Failed to add the LAS file to the dataset.", "Kylidar", MessageBoxButton.OK, MessageBoxImage.Error);
-
-            ShowLasDatasetPrompt = false;
+            await LasDatasetService.AddToMapAsync(datasetPath);
         }
 
         #endregion

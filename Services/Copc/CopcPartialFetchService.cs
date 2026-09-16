@@ -118,7 +118,7 @@ namespace KylidarAddin.Services.Copc
                 var allRanges = neededRanges.Concat(keptChunks).ToList();
                 var merged = CoalesceRanges(allRanges);
 
-                progress?.Report($"Partial fetch: {merged.Count} range request(s), {merged.Sum(r => r.size) / 1024 / 1024.0:F1} MB of {maxExtent / 1024 / 1024.0:F1} MB tile.");
+                progress?.Report($"Partial fetch {Path.GetFileName(destinationPath)}: {merged.Count} range request(s), {merged.Sum(r => r.size) / 1024 / 1024.0:F1} MB of {maxExtent / 1024 / 1024.0:F1} MB tile.");
 
                 await WriteSparseFileAsync(href, destinationPath, maxExtent, merged, ct).ConfigureAwait(false);
             }

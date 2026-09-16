@@ -14,6 +14,14 @@
     -->
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <Style x:Key="InfoButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="4,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
     </UserControl.Resources>
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="10">
@@ -25,19 +33,10 @@
                 <Button Content="Draw Polygon" Command="{Binding DrawPolygonCommand}" Margin="2" Padding="6,3"/>
                 <Button Content="Select Feature" Command="{Binding SelectFeatureCommand}" Margin="2" Padding="6,3"/>
             </UniformGrid>
+            <Button Content="Clear Selection" Command="{Binding ClearAoiCommand}" HorizontalAlignment="Left" Margin="2,4,2,0" Padding="6,3"/>
             <TextBlock Text="{Binding AoiStatusText}" TextWrapping="Wrap" Margin="0,4,0,12"/>
 
             <Separator Margin="0,0,0,12"/>
-
-            <TextBlock Text="Clip Settings" FontWeight="Bold" Margin="0,0,0,4"/>
-            <Grid Margin="0,0,0,6">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="110"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="Buffer (feet):" VerticalAlignment="Center"/>
-                <TextBox Grid.Column="1" Text="{Binding BufferFeetText, UpdateSourceTrigger=PropertyChanged}"/>
-            </Grid>
 
             <TextBlock Text="LiDAR phase(s):" Margin="0,0,0,2"/>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
@@ -47,22 +46,99 @@
                 <CheckBox Content="Phase 3" IsChecked="{Binding Phase3}"/>
             </StackPanel>
 
-            <TextBlock Text="Output .las file:" Margin="0,0,0,2"/>
+            <Button Content="Search Catalog" Command="{Binding SearchCatalogCommand}" HorizontalAlignment="Left" Padding="10,3" Margin="0,0,0,4"/>
+            <TextBlock Text="{Binding CatalogSearchStatusText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+            <Separator Margin="0,0,0,12"/>
+
+            <TextBlock Text="Output" FontWeight="Bold" Margin="0,0,0,4"/>
+            <StackPanel Margin="0,0,0,4">
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                    <CheckBox Content="{Binding DownloadCopcOnlyLabel}" IsChecked="{Binding IsDownloadCopcOnlySelected}" VerticalAlignment="Center"/>
+                    <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                            ToolTip="Fastest, least disk space: downloads the raw COPC/LAZ tile(s) as-is. No clipping or conversion -- you get compressed source files, not ready-to-use .las."/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                    <CheckBox Content="Download &amp; Convert to LAS" IsChecked="{Binding IsConvertKeepCopcSelected}" VerticalAlignment="Center"/>
+                    <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                            ToolTip="Downloads the raw tile(s) AND converts to .las, keeping both (in separate COPC and LAS subfolders). Most disk space, but the raw tiles are on hand again without re-downloading."/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <CheckBox Content="Download, Convert to LAS, Discard COPC" IsChecked="{Binding IsConvertDiscardCopcSelected}" VerticalAlignment="Center"/>
+                    <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                            ToolTip="Downloads the raw tile(s), converts to .las, then deletes the raw copies. Least disk space of the conversion options, but you'd need to re-download the raw tile(s) if wanted again."/>
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                <CheckBox Content="Clip to area of interest" IsChecked="{Binding ClipToAoi}" VerticalAlignment="Center"/>
+                <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                        ToolTip="Crops every tile down to the AOI (plus the buffer below) using PDAL during conversion. Can significantly increase processing time, especially for large AOIs or many tiles."/>
+            </StackPanel>
+            <Grid Margin="0,0,0,2" Visibility="{Binding ShowBufferSettings, Converter={StaticResource BoolToVis}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Buffer (feet):" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <TextBox Grid.Column="1" Text="{Binding BufferFeetText, UpdateSourceTrigger=PropertyChanged}"/>
+            </Grid>
+            <TextBlock Text="A buffer is required to clip a point or line area of interest." Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,2"
+                       Visibility="{Binding ShowBufferRequiredWarning, Converter={StaticResource BoolToVis}}"/>
+            <TextBlock Text="Warning: polygons with holes, gaps, or islands can cause the Run process to error when clipping is enabled." Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,6"
+                       Visibility="{Binding ShowAoiClipComplexityWarning, Converter={StaticResource BoolToVis}}"/>
+
             <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox Text="{Binding OutputLasPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0"/>
-                <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseOutputCommand}" Padding="8,3"/>
+                <TextBox Text="{Binding OutputFolder, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0"/>
+                <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseOutputFolderCommand}" Padding="8,3"/>
             </Grid>
+
+            <Separator Margin="0,0,0,12"/>
+
+            <TextBlock Text="Add to LAS Dataset" FontWeight="Bold" Margin="0,0,0,4"/>
+            <StackPanel Margin="0,0,0,4">
+                <CheckBox Content="None" IsChecked="{Binding IsDatasetActionNoneSelected}" Margin="0,0,0,2"/>
+                <CheckBox Content="Create new dataset" IsChecked="{Binding IsDatasetActionCreateNewSelected}" Margin="0,0,0,2"/>
+                <CheckBox Content="Add to existing dataset" IsChecked="{Binding IsDatasetActionAddExistingSelected}"/>
+            </StackPanel>
+
+            <Grid Margin="0,0,0,6" Visibility="{Binding ShowNewDatasetPath, Converter={StaticResource BoolToVis}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Text="{Binding NewDatasetPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0"/>
+                <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseNewDatasetCommand}" Padding="8,3"/>
+            </Grid>
+
+            <Grid Margin="0,0,0,6" Visibility="{Binding ShowExistingDatasetPath, Converter={StaticResource BoolToVis}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Text="{Binding ExistingDatasetPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0"/>
+                <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseExistingDatasetCommand}" Padding="8,3"/>
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                <CheckBox Content="Build pyramids (not recommended)" IsChecked="{Binding BuildPyramids}" IsEnabled="{Binding CanBuildPyramids}" VerticalAlignment="Center"/>
+                <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                        ToolTip="Speeds up display of the dataset in the map, but can add significantly more time to processing."/>
+            </StackPanel>
 
             <TextBlock Text="{Binding ValidationText}" Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,6"/>
 
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                 <Button Content="Run" Command="{Binding RunCommand}" Padding="14,4" Margin="0,0,8,0"/>
-                <Button Content="Cancel" Command="{Binding CancelCommand}" Padding="14,4"/>
+                <Button Content="Cancel" Command="{Binding CancelCommand}" Padding="14,4" Margin="0,0,8,0"/>
+                <Button Content="Export Script..." Command="{Binding ExportScriptCommand}" Padding="14,4"
+                        ToolTip="Write a stand-alone download/convert script for the current AOI's tiles, to run without ArcGIS Pro."/>
             </StackPanel>
+            <TextBlock Text="{Binding ExportScriptStatusText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
             <ProgressBar IsIndeterminate="True" Height="14" Margin="0,0,0,8" Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"/>
 
@@ -80,14 +156,6 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
-
-            <StackPanel Visibility="{Binding ShowLasDatasetPrompt, Converter={StaticResource BoolToVis}}">
-                <TextBlock Text="Add the clipped LAS to a dataset:" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                <StackPanel Orientation="Horizontal">
-                    <Button Content="Create New..." Command="{Binding CreateNewLasDatasetCommand}" Padding="10,3" Margin="0,0,8,0"/>
-                    <Button Content="Add To Existing..." Command="{Binding AddToExistingLasDatasetCommand}" Padding="10,3"/>
-                </StackPanel>
-            </StackPanel>
 
         </StackPanel>
     </ScrollViewer>

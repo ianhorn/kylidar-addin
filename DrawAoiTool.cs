@@ -5,6 +5,10 @@
  * inside CopcClipService. One tool class per sketch type (each with a fixed SketchType set in
  * the constructor) -- this is the reliable Pro SDK pattern: a single tool instance with a
  * dynamically-changed SketchType does not switch sketch behavior.
+ *
+ * Each sketch is also saved as a feature in the map's Point/Line/Polygon Map Notes layer (see
+ * MapNotesService) so the user keeps a persistent, editable/reselectable record of what they drew,
+ * not just the transient in-memory AoiState.
  */
 using System;
 using System.Collections.Generic;
@@ -16,6 +20,7 @@ using ArcGIS.Core.Data;
 using ArcGIS.Core.Geometry;
 using ArcGIS.Desktop.Framework.Threading.Tasks;
 using ArcGIS.Desktop.Mapping;
+using KylidarAddin.Services;
 
 namespace KylidarAddin
 {
@@ -36,45 +41,71 @@ namespace KylidarAddin
             Description = description;
             Changed?.Invoke(null, EventArgs.Empty);
         }
+
+        public static void Clear()
+        {
+            Current = null;
+            Description = null;
+            Changed?.Invoke(null, EventArgs.Empty);
+        }
     }
 
     internal abstract class DrawAoiToolBase : MapTool
     {
+        private readonly MapNoteKind _noteKind;
         private readonly string _aoiLabel;
 
-        protected DrawAoiToolBase(SketchGeometryType sketchType, string aoiLabel) : base()
+        protected DrawAoiToolBase(SketchGeometryType sketchType, MapNoteKind noteKind, string aoiLabel) : base()
         {
             IsSketchTool = true;
             SketchType = sketchType;
             SketchOutputMode = SketchOutputMode.Map; // geometry in map coordinates
+            _noteKind = noteKind;
             _aoiLabel = aoiLabel;
         }
 
-        protected override Task<bool> OnSketchCompleteAsync(Geometry geometry)
+        protected override async Task<bool> OnSketchCompleteAsync(Geometry geometry)
         {
-            if (geometry == null) return Task.FromResult(false);
+            if (geometry == null) return false;
+
+            // Record it as a real, persistent map note feature so the user has an editable/
+            // reselectable record of what they drew -- but don't let a hiccup there (e.g. the
+            // layer template missing) block the core AOI workflow, which only needs AoiState.
+            var map = MapView.Active?.Map;
+            if (map != null)
+            {
+                try
+                {
+                    await MapNotesService.AddNoteAsync(map, _noteKind, geometry, _aoiLabel);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Drew the AOI, but couldn't add it to the {_aoiLabel} Map Notes layer: {ex.Message}",
+                        "Kylidar", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
 
             AoiState.Set(geometry, _aoiLabel);
-            return Task.FromResult(true);
+            return true;
         }
     }
 
     internal class DrawPointAoiTool : DrawAoiToolBase
     {
         public const string ToolId = "KylidarAddin_DrawPointAoiTool";
-        public DrawPointAoiTool() : base(SketchGeometryType.Point, "Point AOI") { }
+        public DrawPointAoiTool() : base(SketchGeometryType.Point, MapNoteKind.Point, "Point AOI") { }
     }
 
     internal class DrawLineAoiTool : DrawAoiToolBase
     {
         public const string ToolId = "KylidarAddin_DrawLineAoiTool";
-        public DrawLineAoiTool() : base(SketchGeometryType.Line, "Line AOI") { }
+        public DrawLineAoiTool() : base(SketchGeometryType.Line, MapNoteKind.Line, "Line AOI") { }
     }
 
     internal class DrawPolygonAoiTool : DrawAoiToolBase
     {
         public const string ToolId = "KylidarAddin_DrawPolygonAoiTool";
-        public DrawPolygonAoiTool() : base(SketchGeometryType.Polygon, "Polygon AOI") { }
+        public DrawPolygonAoiTool() : base(SketchGeometryType.Polygon, MapNoteKind.Polygon, "Polygon AOI") { }
     }
 
     /// <summary>
@@ -90,7 +121,11 @@ namespace KylidarAddin
         {
             IsSketchTool = true;
             SketchType = SketchGeometryType.Rectangle;
-            SketchOutputMode = SketchOutputMode.Map;
+            // Screen (not Map) coordinates -- MapView.SelectFeatures throws in 3D scenes if handed
+            // a map-coordinate sketch ("3D views only support selecting features interactively
+            // using geometry in screen coordinates..."); screen coordinates work for both 2D maps
+            // and 3D scenes, so this is the one mode that works everywhere.
+            SketchOutputMode = SketchOutputMode.Screen;
         }
 
         protected override async Task<bool> OnSketchCompleteAsync(Geometry geometry)
@@ -148,6 +183,16 @@ namespace KylidarAddin
 
                 AoiState.Set(unioned, $"AOI from {count} selected feature(s)");
                 return true;
+            }
+            catch (Exception ex)
+            {
+                // A malformed feature geometry (e.g. a bad SR/Z mismatch written by some other tool)
+                // could throw here during Project/Union -- show it instead of letting it escape
+                // OnSketchCompleteAsync unhandled, which has previously crashed Pro entirely rather
+                // than just failing this one selection.
+                MessageBox.Show($"Couldn't use the selected feature(s) as an AOI: {ex.Message}",
+                    "Kylidar", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
             }
             finally
             {
