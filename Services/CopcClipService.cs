@@ -17,7 +17,7 @@
  * concurrently -- one shared pipeline covering every tile (an earlier approach here) runs as a
  * single Python/PDAL process, so it can't use more than one core no matter how many tiles there
  * are; a separate process per tile gets genuine OS-level parallelism instead. Concurrency is capped
- * at 60% of the core count for this CPU-bound step (see MaxTileConvertConcurrency -- leaves the
+ * at 50% of the core count for this CPU-bound step (see MaxTileConvertConcurrency -- leaves the
  * rest of the system, Pro's own UI thread included, some headroom) and throttled back further under
  * memory pressure (see RunWithAdaptiveConcurrencyAsync), since process count -- not point count --
  * is what drives memory footprint here. The earlier, network-bound tile-fetch step uses a separate,
@@ -61,7 +61,7 @@ namespace KylidarAddin.Services
         /// would allow using all-but-one), while the 75% cap keeps this from creeping up toward
         /// "every core but 2" on big machines (e.g. 62 of 64) where that stops leaving meaningful
         /// headroom. This step is network-bound, not CPU-bound (barely touches the CPU) -- a looser
-        /// cap than MaxTileConvertConcurrency's 60%, which governs the actually CPU-bound convert
+        /// cap than MaxTileConvertConcurrency's 50%, which governs the actually CPU-bound convert
         /// step below. A large value here means that many simultaneous full-file HTTP downloads
         /// against the same host -- worth watching for if that host starts throttling/erroring
         /// under load.
@@ -299,12 +299,12 @@ namespace KylidarAddin.Services
         }
 
         /// <summary>
-        /// Cap per-tile PDAL process concurrency at 60% of logical cores rather than 100%: each
+        /// Cap per-tile PDAL process concurrency at 50% of logical cores rather than 100%: each
         /// process is CPU-bound (LAZ decompression, format conversion, and -- when clipping --
         /// cropping/merging), so saturating every core leaves nothing for the rest of the system --
         /// ArcGIS Pro's own UI thread included -- to stay responsive while a big run is going.
         /// </summary>
-        private static int MaxTileConvertConcurrency => Math.Max(1, (int)(Environment.ProcessorCount * 0.60));
+        private static int MaxTileConvertConcurrency => Math.Max(1, (int)(Environment.ProcessorCount * 0.50));
 
         /// <summary>Run one PDAL process per tile, concurrently (see RunWithAdaptiveConcurrencyAsync
         /// for the concurrency/memory policy). <paramref name="outputPaths"/> is parallel to
@@ -404,6 +404,14 @@ namespace KylidarAddin.Services
         /// (documented to produce one output point-view PER region, not a union) -- so a multi-part
         /// AOI needs one filters.crop branch per part off a single reader, recombined via
         /// filters.merge before the writer.
+        ///
+        /// cropWktParts are always in WGS84 (see PrepareAoi/GeoJsonConverter.ToWktParts), not the
+        /// tile's own CRS (a Kentucky State Plane variant, in feet). Both crop mechanisms otherwise
+        /// assume the polygon is in the SAME CRS as the point data, so the WGS84 lon/lat coordinates
+        /// must be tagged explicitly or every point silently fails the crop (verified empirically):
+        /// readers.copc's "polygon" option takes the CRS as a "/EPSG:xxxx" suffix appended directly
+        /// to each WKT string; filters.crop instead needs a separate "a_srs" option (the same suffix
+        /// syntax there is silently ignored, still cropping against the tile's native CRS).
         /// </summary>
         private static string BuildSingleTileConvertPipelineJson(
             string tilePath, bool isCopc, string outputPath, IReadOnlyList<string> cropWktParts)
@@ -427,7 +435,7 @@ namespace KylidarAddin.Services
                     w.WriteString("filename", tilePath);
                     w.WritePropertyName("polygon");
                     w.WriteStartArray();
-                    foreach (var wkt in cropWktParts) w.WriteStringValue(wkt);
+                    foreach (var wkt in cropWktParts) w.WriteStringValue(wkt + "/EPSG:4326");
                     w.WriteEndArray();
                     w.WriteString("tag", readTag);
                     w.WriteEndObject();
@@ -448,6 +456,7 @@ namespace KylidarAddin.Services
                         w.WriteStartObject();
                         w.WriteString("type", "filters.crop");
                         w.WriteString("polygon", cropWktParts[i]);
+                        w.WriteString("a_srs", "EPSG:4326");
                         w.WritePropertyName("inputs");
                         w.WriteStartArray();
                         w.WriteStringValue(readTag);

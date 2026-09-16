@@ -20,8 +20,13 @@
  * back together with "pdal merge", deleting the temp files afterward -- since a single "pdal
  * translate ... crop" invocation with multiple polygons doesn't union them the way this add-in
  * needs (see CopcClipService's header comment for the underlying PDAL behavior this works around).
+ * Every crop call also passes "--filters.crop.a_srs=EPSG:4326": cropWktParts are always in WGS84,
+ * not the tile's own CRS, and filters.crop otherwise silently assumes the polygon is in the SAME
+ * CRS as the point data -- verified empirically that omitting this makes every point fail the crop
+ * (the WGS84 lon/lat numbers get treated as the tile's native, much larger projected coordinates),
+ * producing an empty .las whose degenerate (0,0) extent then displays thousands of miles away.
  *
- * Concurrency is computed by the generated script itself, at the time it runs (60% of whatever
+ * Concurrency is computed by the generated script itself, at the time it runs (50% of whatever
  * machine executes it, not the machine that exported it) -- matches CopcClipService's own
  * MaxTileConvertConcurrency policy for the in-app Run pipeline, for the same reason: each
  * concurrent unit of work here is CPU-bound (download is only half of it; conversion/crop runs one
@@ -85,7 +90,7 @@ namespace KylidarAddin.Services
                 "import urllib.request",
                 "",
                 $"DEST_FOLDER = pathlib.Path(\"{EscapePy(destFolder)}\")",
-                "CONCURRENCY = max(1, int((os.cpu_count() or 4) * 0.6))  # 60% of this machine's logical cores",
+                "CONCURRENCY = max(1, int((os.cpu_count() or 4) * 0.5))  # 50% of this machine's logical cores",
                 $"CONVERT = {(convert ? "True" : "False")}",
                 $"DISCARD_RAW = {(discardRaw ? "True" : "False")}",
                 "",
@@ -110,14 +115,16 @@ namespace KylidarAddin.Services
             lines.Add("        return");
             lines.Add("    if len(CROP_WKT_PARTS) == 1:");
             lines.Add("        _run_pdal([\"translate\", str(raw_path), str(las_path), \"crop\",");
-            lines.Add("                   f\"--filters.crop.polygon={CROP_WKT_PARTS[0]}\"])");
+            lines.Add("                   f\"--filters.crop.polygon={CROP_WKT_PARTS[0]}\",");
+            lines.Add("                   \"--filters.crop.a_srs=EPSG:4326\"])");
             lines.Add("        return");
             lines.Add("    part_paths = []");
             lines.Add("    try:");
             lines.Add("        for i, wkt in enumerate(CROP_WKT_PARTS):");
             lines.Add("            part_path = las_dir / f\"{base}__part{i}.las\"");
             lines.Add("            _run_pdal([\"translate\", str(raw_path), str(part_path), \"crop\",");
-            lines.Add("                       f\"--filters.crop.polygon={wkt}\"])");
+            lines.Add("                       f\"--filters.crop.polygon={wkt}\",");
+            lines.Add("                       \"--filters.crop.a_srs=EPSG:4326\"])");
             lines.Add("            part_paths.append(part_path)");
             lines.Add("        _run_pdal([\"merge\", *[str(p) for p in part_paths], str(las_path)])");
             lines.Add("    finally:");
@@ -217,7 +224,7 @@ namespace KylidarAddin.Services
                 "import urllib.request",
                 "",
                 $"DEST_FOLDER = pathlib.Path(\"{EscapePy(destFolder)}\")",
-                "CONCURRENCY = max(1, int((os.cpu_count() or 4) * 0.6))  # 60% of this machine's logical cores",
+                "CONCURRENCY = max(1, int((os.cpu_count() or 4) * 0.5))  # 50% of this machine's logical cores",
                 $"CONVERT = {(convert ? "True" : "False")}",
                 $"DISCARD_RAW = {(discardRaw ? "True" : "False")}",
                 "",
@@ -243,14 +250,16 @@ namespace KylidarAddin.Services
                 "        return",
                 "    if len(CROP_WKT_PARTS) == 1:",
                 "        _run_pdal([\"translate\", str(raw_path), str(las_path), \"crop\",",
-                "                   f\"--filters.crop.polygon={CROP_WKT_PARTS[0]}\"])",
+                "                   f\"--filters.crop.polygon={CROP_WKT_PARTS[0]}\",",
+                "                   \"--filters.crop.a_srs=EPSG:4326\"])",
                 "        return",
                 "    part_paths = []",
                 "    try:",
                 "        for i, wkt in enumerate(CROP_WKT_PARTS):",
                 "            part_path = las_dir / f\"{base}__part{i}.las\"",
                 "            _run_pdal([\"translate\", str(raw_path), str(part_path), \"crop\",",
-                "                       f\"--filters.crop.polygon={wkt}\"])",
+                "                       f\"--filters.crop.polygon={wkt}\",",
+                "                       \"--filters.crop.a_srs=EPSG:4326\"])",
                 "            part_paths.append(part_path)",
                 "        _run_pdal([\"merge\", *[str(p) for p in part_paths], str(las_path)])",
                 "    finally:",
@@ -373,7 +382,7 @@ namespace KylidarAddin.Services
                 "#>",
                 "",
                 $"$DestFolder  = '{EscapePs(destFolder)}'",
-                "$Concurrency = [Math]::Max(1, [Math]::Floor([Environment]::ProcessorCount * 0.6))  # 60% of this machine's logical cores",
+                "$Concurrency = [Math]::Max(1, [Math]::Floor([Environment]::ProcessorCount * 0.5))  # 50% of this machine's logical cores",
                 $"$Convert     = ${(convert ? "true" : "false")}",
                 $"$DiscardRaw  = ${(discardRaw ? "true" : "false")}",
                 "",
@@ -424,14 +433,14 @@ namespace KylidarAddin.Services
             lines.Add("                & pdal translate $rawPath $lasPath 2>&1 | Out-Null");
             lines.Add("                if ($LASTEXITCODE -ne 0) { return \"FAIL convert $fname (pdal exit $LASTEXITCODE)\" }");
             lines.Add("            } elseif ($cropWktParts.Count -eq 1) {");
-            lines.Add("                & pdal translate $rawPath $lasPath crop \"--filters.crop.polygon=$($cropWktParts[0])\" 2>&1 | Out-Null");
+            lines.Add("                & pdal translate $rawPath $lasPath crop \"--filters.crop.polygon=$($cropWktParts[0])\" \"--filters.crop.a_srs=EPSG:4326\" 2>&1 | Out-Null");
             lines.Add("                if ($LASTEXITCODE -ne 0) { return \"FAIL convert $fname (pdal exit $LASTEXITCODE)\" }");
             lines.Add("            } else {");
             lines.Add("                $partPaths = @()");
             lines.Add("                try {");
             lines.Add("                    for ($i = 0; $i -lt $cropWktParts.Count; $i++) {");
             lines.Add("                        $partPath = Join-Path $lasDir \"$base__part$i.las\"");
-            lines.Add("                        & pdal translate $rawPath $partPath crop \"--filters.crop.polygon=$($cropWktParts[$i])\" 2>&1 | Out-Null");
+            lines.Add("                        & pdal translate $rawPath $partPath crop \"--filters.crop.polygon=$($cropWktParts[$i])\" \"--filters.crop.a_srs=EPSG:4326\" 2>&1 | Out-Null");
             lines.Add("                        if ($LASTEXITCODE -ne 0) { return \"FAIL convert $fname (pdal exit $LASTEXITCODE)\" }");
             lines.Add("                        $partPaths += $partPath");
             lines.Add("                    }");
@@ -482,12 +491,12 @@ namespace KylidarAddin.Services
                 "",
                 $"DEST_FOLDER=\"{EscapeSh(destFolder)}\"",
                 "",
-                "# 60% of this machine's logical cores (nproc: Linux/WSL, getconf: POSIX fallback, sysctl: macOS).",
+                "# 50% of this machine's logical cores (nproc: Linux/WSL, getconf: POSIX fallback, sysctl: macOS).",
                 "if command -v nproc >/dev/null 2>&1; then NCPU=$(nproc)",
                 "elif command -v getconf >/dev/null 2>&1; then NCPU=$(getconf _NPROCESSORS_ONLN)",
                 "elif command -v sysctl >/dev/null 2>&1; then NCPU=$(sysctl -n hw.ncpu)",
                 "else NCPU=4; fi",
-                "CONCURRENCY=$(( NCPU * 60 / 100 ))",
+                "CONCURRENCY=$(( NCPU * 50 / 100 ))",
                 "if [ \"$CONCURRENCY\" -lt 1 ]; then CONCURRENCY=1; fi",
                 "",
                 $"CONVERT={(convert ? 1 : 0)}",
@@ -510,12 +519,12 @@ namespace KylidarAddin.Services
             lines.Add("  if [ ${#CROP_WKT_PARTS[@]} -eq 0 ]; then");
             lines.Add("    pdal translate \"$raw_path\" \"$las_path\" >/dev/null 2>&1");
             lines.Add("  elif [ ${#CROP_WKT_PARTS[@]} -eq 1 ]; then");
-            lines.Add("    pdal translate \"$raw_path\" \"$las_path\" crop \"--filters.crop.polygon=${CROP_WKT_PARTS[0]}\" >/dev/null 2>&1");
+            lines.Add("    pdal translate \"$raw_path\" \"$las_path\" crop \"--filters.crop.polygon=${CROP_WKT_PARTS[0]}\" \"--filters.crop.a_srs=EPSG:4326\" >/dev/null 2>&1");
             lines.Add("  else");
             lines.Add("    local temp_parts=() i=0 ok=0");
             lines.Add("    for wkt in \"${CROP_WKT_PARTS[@]}\"; do");
             lines.Add("      local part_path=\"$las_dir/${base}__part${i}.las\"");
-            lines.Add("      pdal translate \"$raw_path\" \"$part_path\" crop \"--filters.crop.polygon=$wkt\" >/dev/null 2>&1 || { rm -f \"${temp_parts[@]}\"; return 1; }");
+            lines.Add("      pdal translate \"$raw_path\" \"$part_path\" crop \"--filters.crop.polygon=$wkt\" \"--filters.crop.a_srs=EPSG:4326\" >/dev/null 2>&1 || { rm -f \"${temp_parts[@]}\"; return 1; }");
             lines.Add("      temp_parts+=(\"$part_path\")");
             lines.Add("      i=$((i + 1))");
             lines.Add("    done");
