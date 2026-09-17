@@ -73,7 +73,6 @@ namespace KylidarAddin
                 : $"AOI ready: {AoiState.Description}";
             IsPolygonAoi = AoiState.Current is Polygon;
             NotifyPropertyChanged(nameof(ShowAoiClipComplexityWarning));
-            NotifyPropertyChanged(nameof(ShowBufferRequiredWarning));
             CommandManager.InvalidateRequerySuggested();
         }
 
@@ -232,9 +231,7 @@ namespace KylidarAddin
         }
 
         private bool _clipToAoi;
-        /// <summary>Off by default -- clipping is the exception, not the default, and needing a
-        /// buffer before Run/Export Script re-enable (see HasRequiredBufferForClip) would otherwise
-        /// surprise anyone who just wants the full tiles.</summary>
+        /// <summary>Off by default -- clipping is the exception, not the default.</summary>
         public bool ClipToAoi
         {
             get => _clipToAoi;
@@ -242,7 +239,6 @@ namespace KylidarAddin
             {
                 SetProperty(ref _clipToAoi, value);
                 NotifyPropertyChanged(nameof(ShowBufferSettings));
-                NotifyPropertyChanged(nameof(ShowBufferRequiredWarning));
                 NotifyPropertyChanged(nameof(ShowAoiClipComplexityWarning));
                 CommandManager.InvalidateRequerySuggested();
             }
@@ -254,25 +250,11 @@ namespace KylidarAddin
         public string BufferFeetText
         {
             get => _bufferFeetText;
-            set
-            {
-                SetProperty(ref _bufferFeetText, value);
-                NotifyPropertyChanged(nameof(ShowBufferRequiredWarning));
-                CommandManager.InvalidateRequerySuggested();
-            }
+            set => SetProperty(ref _bufferFeetText, value);
         }
 
         private bool TryGetBufferFeet(out double feet) =>
             double.TryParse(BufferFeetText, out feet) && feet > 0;
-
-        /// <summary>
-        /// A buffer is required when clipping a point or line AOI -- neither has any area to crop
-        /// by without one. A polygon AOI already has an area, so its buffer is optional (0/empty
-        /// clips to the polygon's own boundary). Backs the Run/Export Script safety disable below.
-        /// </summary>
-        public bool HasRequiredBufferForClip => !ClipToAoi || IsPolygonAoi || TryGetBufferFeet(out _);
-
-        public bool ShowBufferRequiredWarning => ClipToAoi && !HasRequiredBufferForClip;
 
         /// <summary>Warns that a polygon AOI (drawn or from Select Feature) with holes, gaps, or
         /// islands can make PDAL's crop step error -- only relevant once clipping is turned on.</summary>
@@ -411,7 +393,7 @@ namespace KylidarAddin
 
         public ICommand ExportScriptCommand => new RelayCommand(async () => await ExportScriptAsync(), CanExportScript);
 
-        private bool CanExportScript() => !IsRunning && !IsSearching && HasRequiredBufferForClip;
+        private bool CanExportScript() => !IsRunning && !IsSearching;
 
         /// <summary>
         /// Write a stand-alone download/convert script for the AOI's current matching tiles, using
@@ -490,7 +472,7 @@ namespace KylidarAddin
             }
         }
 
-        private bool CanRun() => !IsRunning && !IsSearching && HasRequiredBufferForClip;
+        private bool CanRun() => !IsRunning && !IsSearching;
 
         private async Task RunAsync()
         {

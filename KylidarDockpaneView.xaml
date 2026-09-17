@@ -83,8 +83,6 @@
                 <TextBlock Text="Buffer (feet):" VerticalAlignment="Center" Margin="0,0,6,0"/>
                 <TextBox Grid.Column="1" Text="{Binding BufferFeetText, UpdateSourceTrigger=PropertyChanged}"/>
             </Grid>
-            <TextBlock Text="A buffer is required to clip a point or line area of interest." Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,2"
-                       Visibility="{Binding ShowBufferRequiredWarning, Converter={StaticResource BoolToVis}}"/>
             <TextBlock Text="Warning: polygons with holes, gaps, or islands can cause the Run process to error when clipping is enabled." Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,6"
                        Visibility="{Binding ShowAoiClipComplexityWarning, Converter={StaticResource BoolToVis}}"/>
 
