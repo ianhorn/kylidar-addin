@@ -16,18 +16,28 @@ actually within Kentucky From Above's LiDAR coverage.
 
 ## "Could not find ArcGIS Pro's bundled Python (arcgispro-py3)"
 
-The clip step runs PDAL through ArcGIS Pro's own conda Python environment; this means that
+The convert step runs PDAL through ArcGIS Pro's own conda Python environment; this means that
 environment wasn't found at the expected install location. Confirm ArcGIS Pro itself is installed
 normally (not a custom/minimal install that dropped the bundled Python environment).
 
-## PDAL: "Geometrically invalid polygon in option 'polygon'"
+## Clipped output has zero points, or the LAS dataset displays far from Kentucky
 
-This means the crop geometry sent to PDAL wasn't a valid simple polygon -- most likely because a
-**Select Feature** AOI came back multi-part (e.g. two disjoint selected features, or a feature
-that's itself multi-part). This is handled automatically as of the current version, which splits
-multi-part AOIs into a proper `MULTIPOLYGON`/`MULTILINESTRING` instead of merging every ring into
-one; if you still hit this, it's worth filing as a bug with the AOI's source (drawn vs. selected)
-and roughly how many parts it likely has.
+If clipping is enabled and the run "succeeds" but produces empty `.las` files -- and adding them to
+a LAS dataset zooms to somewhere nowhere near Kentucky (e.g. northern Mexico) -- this was a known
+bug where the AOI's crop polygon (always in WGS84) was handed to PDAL without an explicit
+coordinate system, so PDAL compared it against the tile's native Kentucky State Plane coordinates
+and every point failed the crop. An empty `.las` file's header defaults its extent to `(0,0)`,
+which that state-plane projection's false origin places in Mexico -- hence the symptom. This is
+fixed as of the current version; if you still see it, make sure you're on an up-to-date build (see
+[Installation](installation.md)).
+
+## PDAL crop errors on a polygon AOI
+
+If Run fails during conversion with a PDAL error and you have **Clip to area of interest** enabled,
+check whether the AOI polygon has holes, gaps, or islands (disjoint pieces) -- Kylidar warns about
+this under the clip checkbox, but PDAL's crop filter/reader options can still fail on genuinely
+complex multi-part polygons. Simplify the AOI (a single simple polygon, or a bigger buffer around a
+point/line instead) and try again.
 
 ## STAC API 400 BadRequest mentioning `"Point"`/`"Polygon"` type mismatches
 
@@ -37,10 +47,9 @@ times in a row, which points at a degenerate buffer rather than a STAC API probl
 looks correct and well-formed, it may be worth checking the STAC catalog's own `intersects` schema
 for what geometry types it actually accepts.
 
-## Run stays disabled
+## Run/Search Catalog/Export Script stays disabled
 
-- For a point or line AOI, enter a buffer distance greater than `0`.
-- If you just finished drawing/selecting an AOI and Run still looks disabled, click anywhere in
-  the pane (e.g. the buffer field) -- this is a known WPF quirk where a command's enabled-state
-  doesn't always refresh immediately after a map-tool event; it should already be fixed in the
-  current version, but a stray click works around it if not.
+These require an AOI (draw or select one first). If you just finished drawing/selecting an AOI and
+a button still looks disabled, click anywhere in the pane -- this is a known WPF quirk where a
+command's enabled-state doesn't always refresh immediately after a map-tool event; it should
+already be handled in the current version, but a stray click works around it if not.

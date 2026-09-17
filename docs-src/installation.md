@@ -7,8 +7,9 @@
   `Esri.ProApp.SDK.Desktop.targets` build integration this project relies on).
 - **Visual Studio**, with the ArcGIS Pro SDK for .NET extension installed.
 
-No separate [PDAL](https://pdal.io/) install is needed -- the clip step runs PDAL through ArcGIS
-Pro's own bundled conda Python environment (`arcgispro-py3`), which already ships it.
+No separate [PDAL](https://pdal.io/) install is needed -- the convert (and optional clip) step runs
+PDAL through ArcGIS Pro's own bundled conda Python environment (`arcgispro-py3`), which already
+ships it.
 
 ## Download pre-built add-in
 
