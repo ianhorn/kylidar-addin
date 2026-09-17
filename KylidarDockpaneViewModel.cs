@@ -143,6 +143,29 @@ namespace KylidarAddin
             set => SetProperty(ref _isSearching, value);
         }
 
+        private string _searchLimitText = CopcClipService.DefaultSearchLimit.ToString();
+        /// <summary>Backs the "Search limit" field that only becomes visible once a search hits it
+        /// (see SearchHitLimit) -- string-typed like BufferFeetText so an in-progress/invalid edit
+        /// doesn't throw a WPF binding error.</summary>
+        public string SearchLimitText
+        {
+            get => _searchLimitText;
+            set => SetProperty(ref _searchLimitText, value);
+        }
+
+        private int GetSearchLimit() =>
+            int.TryParse(SearchLimitText, out var v) && v > 0 ? v : CopcClipService.DefaultSearchLimit;
+
+        private bool _searchHitLimit;
+        /// <summary>True once a search comes back with exactly as many items as the current search
+        /// limit -- there may be more coverage than what was found. Shows the "Search limit" field so
+        /// the user can raise it and search again; Run/Export Script also pick up the raised limit.</summary>
+        public bool SearchHitLimit
+        {
+            get => _searchHitLimit;
+            set => SetProperty(ref _searchHitLimit, value);
+        }
+
         public ICommand SearchCatalogCommand => new RelayCommand(async () => await SearchCatalogAsync(), CanSearchCatalog);
 
         private bool CanSearchCatalog() => !IsRunning && !IsSearching;
@@ -172,12 +195,16 @@ namespace KylidarAddin
                 var aoi = AoiState.Current;
                 var bufferFeet = TryGetBufferFeet(out var bf) ? bf : 0;
                 var clipToAoi = ClipToAoi;
+                var searchLimit = GetSearchLimit();
                 var aoiInfo = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, clipToAoi, bufferFeet));
-                var count = await CopcClipService.SearchTileCountAsync(aoiInfo.GeoJson, collections);
+                var (count, hitLimit) = await CopcClipService.SearchTileCountAsync(aoiInfo.GeoJson, collections, searchLimit);
                 FoundTileCount = count;
+                SearchHitLimit = hitLimit;
                 CatalogSearchStatusText = count == 0
                     ? "No LiDAR coverage found for this AOI in the selected phase(s)."
-                    : $"Found {count} LiDAR tile(s) intersecting the AOI.";
+                    : hitLimit
+                        ? $"Found {count} LiDAR tile(s) -- hit the {searchLimit}-tile search limit, there may be more. Raise the limit below and search again."
+                        : $"Found {count} LiDAR tile(s) intersecting the AOI.";
             }
             catch (Exception ex)
             {
@@ -443,8 +470,9 @@ namespace KylidarAddin
                 var aoi = AoiState.Current;
                 var bufferFeet = TryGetBufferFeet(out var bf) ? bf : 0;
                 var clipToAoi = ClipToAoi;
+                var searchLimit = GetSearchLimit();
                 var aoiInfo = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, clipToAoi, bufferFeet));
-                var tileUrls = await CopcClipService.SearchTileUrlsAsync(aoiInfo.GeoJson, collections);
+                var (tileUrls, hitLimit) = await CopcClipService.SearchTileUrlsAsync(aoiInfo.GeoJson, collections, searchLimit);
                 if (tileUrls.Count == 0)
                 {
                     ExportScriptStatusText = "No LiDAR coverage found for this AOI in the selected phase(s).";
@@ -464,7 +492,9 @@ namespace KylidarAddin
                 var scriptPath = Path.Combine(dlg.DestinationFolder, $"kylidar_export_{DateTime.Now:yyyyMMdd_HHmmss}{ext}");
                 await File.WriteAllTextAsync(scriptPath, script);
 
-                ExportScriptStatusText = $"Exported {tileUrls.Count}-tile script to {scriptPath}.";
+                ExportScriptStatusText = hitLimit
+                    ? $"Exported {tileUrls.Count}-tile script to {scriptPath} -- hit the {searchLimit}-tile search limit, there may be more. Raise the limit and export again for the rest."
+                    : $"Exported {tileUrls.Count}-tile script to {scriptPath}.";
             }
             catch (Exception ex)
             {
@@ -523,14 +553,15 @@ namespace KylidarAddin
                 var bufferFeet = TryGetBufferFeet(out var bf) ? bf : 0;
                 var clipToAoi = ClipToAoi;
                 var aoiInfo = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, clipToAoi, bufferFeet));
+                var searchLimit = GetSearchLimit();
                 if (SelectedOutputMode == OutputMode.DownloadCopcOnly)
                 {
-                    result = await CopcClipService.DownloadTilesOnlyAsync(aoiInfo.GeoJson, collections, OutputFolder, progress, _cts.Token);
+                    result = await CopcClipService.DownloadTilesOnlyAsync(aoiInfo.GeoJson, collections, OutputFolder, progress, searchLimit, _cts.Token);
                 }
                 else
                 {
                     bool keepRawCopc = SelectedOutputMode == OutputMode.ConvertKeepCopc;
-                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, collections, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, progress, _cts.Token);
+                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, collections, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, progress, searchLimit, _cts.Token);
                 }
             }
             catch (OperationCanceledException)

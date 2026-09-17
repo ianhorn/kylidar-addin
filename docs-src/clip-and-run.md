@@ -14,6 +14,14 @@ without downloading or converting anything. The result also updates the **Downlo
 only** checkbox label with the count. **Run** always does its own fresh search regardless of
 whether you've clicked this first.
 
+### Search limit
+
+Each search is capped at 200 tiles by default. If a search comes back with exactly that many, a
+**Search limit** field appears below the status text -- raise it and click **Search Catalog** again
+to search past the default cap. **Run** and **Export Script** pick up whatever limit is currently
+set, so if you needed to raise it to see your full coverage, raise it before running or exporting
+too, not just for the preview.
+
 ## Output modes
 
 Pick exactly one (they behave like a radio group, drawn as checkboxes):

@@ -14,6 +14,12 @@
 The STAC search returned zero matching tiles. Try a different phase, or confirm the AOI is
 actually within Kentucky From Above's LiDAR coverage.
 
+## Search Catalog seems to stop at 200 tiles
+
+That's the default search limit, not a bug -- see [Search limit](clip-and-run.md#search-limit). A
+**Search limit** field appears once a search hits it; raise it and search again, and raise it
+before **Run**/**Export Script** too if you need the full coverage, not just the preview count.
+
 ## "Could not find ArcGIS Pro's bundled Python (arcgispro-py3)"
 
 The convert step runs PDAL through ArcGIS Pro's own conda Python environment; this means that

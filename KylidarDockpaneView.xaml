@@ -47,7 +47,12 @@
             </StackPanel>
 
             <Button Content="Search Catalog" Command="{Binding SearchCatalogCommand}" HorizontalAlignment="Left" Padding="10,3" Margin="0,0,0,4"/>
-            <TextBlock Text="{Binding CatalogSearchStatusText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+            <TextBlock Text="{Binding CatalogSearchStatusText}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,10" Visibility="{Binding SearchHitLimit, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="Search limit:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <TextBox Width="70" Text="{Binding SearchLimitText, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
+                <TextBlock Text="Raise this, then click Search Catalog (or Run/Export Script) again." VerticalAlignment="Center" TextWrapping="Wrap" Margin="6,0,0,0"/>
+            </StackPanel>
 
             <Separator Margin="0,0,0,12"/>
 
