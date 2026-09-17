@@ -38,11 +38,12 @@ the **i** button next to the checkbox).
 
 ### Buffer
 
-A **Buffer (feet)** field appears once clipping is turned on. It's optional:
+A **Buffer (feet)** field appears once clipping is turned on. It's optional, and Run/Export Script
+never block on it being set:
 
 - For a **polygon** AOI, leaving it at `0`/empty clips to the polygon's own boundary.
 - For a **point or line** AOI, a buffer is what actually gives the crop an area -- leaving it at
-  `0`/empty means every point gets cropped away, producing empty output.
+  `0`/empty means every point gets cropped away, producing empty output rather than an error.
 
 The buffer (when set) widens *both* the STAC search area and the crop area -- see
 [What actually gets searched vs. clipped](area-of-interest.md#what-actually-gets-searched-vs-clipped).

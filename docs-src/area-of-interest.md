@@ -10,10 +10,11 @@ Click one of the three **Draw** buttons to activate an ArcGIS Pro sketch tool on
 draw your shape and it becomes the AOI. Requires an open map view.
 
 A point or line AOI has no area on its own. This is fine for searching (the STAC search just needs
-an intersecting geometry), but if you also turn on
-[Clip to area of interest](clip-and-run.md#clipping-to-the-area-of-interest), it needs a
-[buffer](clip-and-run.md#buffer) to have any actual area to crop tiles down to -- without one, the
-crop removes every point.
+an intersecting geometry) and for the two output modes with clipping off. If you turn on
+[Clip to area of interest](clip-and-run.md#clipping-to-the-area-of-interest), though, a point or
+line AOI needs a [buffer](clip-and-run.md#buffer) to have any actual area to crop tiles down to.
+This isn't enforced -- Run won't stop you from clipping a point/line AOI with no buffer -- but the
+result is an empty output, since every point gets cropped away.
 
 ## Select Feature
 

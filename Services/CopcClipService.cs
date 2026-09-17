@@ -11,7 +11,7 @@
  *     needed if the raw tile is wanted later.
  * The AOI decides which tiles are found/downloaded (via the STAC "intersects" search); optionally
  * (see "Clip to area of interest" in the dock pane) each tile can also be cropped down to the AOI
- * (plus a required buffer -- see PrepareAoi) during conversion, via PDAL. Clipping only applies to
+ * (plus an optional buffer -- see PrepareAoi) during conversion, via PDAL. Clipping only applies to
  * the two convert modes -- DownloadTilesOnlyAsync never runs PDAL, so there's nothing to crop.
  * Every conversion converts each local tile to its own .las in its OWN PDAL process, run
  * concurrently -- one shared pipeline covering every tile (an earlier approach here) runs as a
@@ -77,10 +77,10 @@ namespace KylidarAddin.Services
         /// run on/blocked against the MCT thread, since it awaits network I/O and an external
         /// process for potentially a long time.
         ///
-        /// A buffer is required when clipping a point or line AOI (enforced by the dock pane before
-        /// Run/Export Script are even enabled) -- neither has any area to crop by without one. A
-        /// polygon AOI already has an area, so its buffer is optional: when clipping is on but no
-        /// buffer was given, the polygon's own boundary is used as-is (bufferFeet is 0 or unparsed).
+        /// A buffer is optional but not enforced: a point or line AOI has no area to crop by without
+        /// one, so clipping with no buffer produces an empty result rather than being blocked. A
+        /// polygon AOI already has an area, so when clipping is on but no buffer was given, the
+        /// polygon's own boundary is used as-is (bufferFeet is 0 or unparsed).
         /// </summary>
         public static AoiSearchInfo PrepareAoi(Geometry aoi, bool clipToAoi, double bufferFeet)
         {

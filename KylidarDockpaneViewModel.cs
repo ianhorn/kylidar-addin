@@ -8,12 +8,12 @@
  * The output/dataset choices are all made up front, before Run, rather than prompted for afterward
  * -- RunAsync executes the whole chosen pipeline in one pass.
  *
- * "Clip to area of interest" crops each tile to the AOI (plus a required buffer -- see
- * CopcClipService.PrepareAoi for why a buffer is required even for polygon AOIs) during
- * conversion; it only affects the two convert output modes, since the "download COPC only" mode
- * never runs PDAL. A drawn/selected polygon AOI with holes, gaps, or islands can make PDAL's crop
- * step fail (see ShowAoiClipComplexityWarning) -- this is inherent to how PDAL's crop filter/reader
- * option handle multi-part polygons, not something this add-in can fully paper over.
+ * "Clip to area of interest" crops each tile to the AOI (plus an optional buffer -- see
+ * CopcClipService.PrepareAoi) during conversion; it only affects the two convert output modes,
+ * since the "download COPC only" mode never runs PDAL. A drawn/selected polygon AOI with holes,
+ * gaps, or islands can make PDAL's crop step fail (see ShowAoiClipComplexityWarning) -- this is
+ * inherent to how PDAL's crop filter/reader option handle multi-part polygons, not something this
+ * add-in can fully paper over.
  */
 using System;
 using System.Collections.Generic;
