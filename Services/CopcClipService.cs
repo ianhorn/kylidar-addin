@@ -51,6 +51,28 @@ namespace KylidarAddin.Services
     {
         public string GeoJson { get; set; }
         public IReadOnlyList<string> CropWktParts { get; set; }
+        /// <summary>The geometry the tile search used, in the AOI's own spatial reference: the AOI
+        /// itself, or its buffer when clipping with a buffer. A polygon here is what breaklines are
+        /// clipped to (see BreaklineService.PrepareRegion); a point/line has no area to clip by.</summary>
+        public Geometry SearchGeometry { get; set; }
+    }
+
+    /// <summary>
+    /// Aggregate run progress across the whole tile set, for a tqdm-style progress bar in the dock
+    /// pane -- a separate channel from the line-by-line IProgress&lt;string&gt; log, which has no
+    /// structured "how far along overall" signal. Phase is "Downloading" or "Converting";
+    /// Completed/Total are counts within that phase (always out of the full tile count).
+    /// OverallFraction (0-1) spans the whole run: for the convert modes, which fetch every tile
+    /// before converting any of them (see ConvertToLasAsync), downloading and converting are each
+    /// weighted 50% of OverallFraction so the bar fills smoothly start to finish instead of sitting
+    /// at 0% through the entire fetch phase, then jumping.
+    /// </summary>
+    public readonly struct RunProgress
+    {
+        public string Phase { get; init; }
+        public int Completed { get; init; }
+        public int Total { get; init; }
+        public double OverallFraction { get; init; }
     }
 
     public static class CopcClipService
@@ -99,7 +121,7 @@ namespace KylidarAddin.Services
             }
 
             var searchWgs84 = (Geometry)GeometryEngine.Instance.Project(searchGeometry, SpatialReferences.WGS84);
-            var info = new AoiSearchInfo { GeoJson = GeoJsonConverter.ToGeoJsonGeometry(searchWgs84) };
+            var info = new AoiSearchInfo { GeoJson = GeoJsonConverter.ToGeoJsonGeometry(searchWgs84), SearchGeometry = searchGeometry };
             if (clipToAoi)
                 info.CropWktParts = GeoJsonConverter.ToWktParts(searchWgs84);
             return info;
@@ -135,7 +157,8 @@ namespace KylidarAddin.Services
         /// outputFolder -- no PDAL involved, no format conversion or clipping.</summary>
         public static async Task<ClipResult> DownloadTilesOnlyAsync(
             string geoJson, IReadOnlyCollection<string> collections, string outputFolder,
-            IProgress<string> progress, int searchLimit = DefaultSearchLimit, CancellationToken ct = default)
+            IProgress<string> progress, IProgress<RunProgress> runProgress = null,
+            int searchLimit = DefaultSearchLimit, CancellationToken ct = default)
         {
             var searchResult = await SearchTilesAsync(geoJson, collections, searchLimit, progress, ct).ConfigureAwait(false);
             var tiles = searchResult.Tiles;
@@ -148,6 +171,8 @@ namespace KylidarAddin.Services
             Directory.CreateDirectory(outputFolder);
 
             var outputPaths = new string[tiles.Count];
+            int completed = 0;
+            runProgress?.Report(new RunProgress { Phase = "Downloading", Completed = 0, Total = tiles.Count, OverallFraction = 0 });
             using (var throttle = new SemaphoreSlim(MaxConcurrentTileFetches))
             {
                 var downloadTasks = tiles.Select(async (t, i) =>
@@ -160,6 +185,8 @@ namespace KylidarAddin.Services
                         var localPath = Path.Combine(outputFolder, fileName);
                         await TileDownloadService.DownloadAsync(t.asset.Href, localPath, progress, ct).ConfigureAwait(false);
                         outputPaths[i] = localPath;
+                        var done = Interlocked.Increment(ref completed);
+                        runProgress?.Report(new RunProgress { Phase = "Downloading", Completed = done, Total = tiles.Count, OverallFraction = (double)done / tiles.Count });
                     }
                     finally
                     {
@@ -210,7 +237,8 @@ namespace KylidarAddin.Services
         public static async Task<ClipResult> ConvertToLasAsync(
             string geoJson, IReadOnlyCollection<string> collections,
             bool keepRawCopc, string outputFolder, IReadOnlyList<string> cropWktParts,
-            IProgress<string> progress, int searchLimit = DefaultSearchLimit, CancellationToken ct = default)
+            IProgress<string> progress, IProgress<RunProgress> runProgress = null,
+            int searchLimit = DefaultSearchLimit, CancellationToken ct = default)
         {
             string tempDir = null;
             try
@@ -242,6 +270,8 @@ namespace KylidarAddin.Services
                 // written into a slot per tile so the output list built afterward stays stable
                 // regardless of fetch order.
                 var localTileSlots = new (string path, bool isCopc)?[tiles.Count];
+                int fetchCompleted = 0;
+                runProgress?.Report(new RunProgress { Phase = "Downloading", Completed = 0, Total = tiles.Count, OverallFraction = 0 });
                 using (var throttle = new SemaphoreSlim(MaxConcurrentTileFetches))
                 {
                     var fetchTasks = tiles.Select(async (t, i) =>
@@ -256,6 +286,10 @@ namespace KylidarAddin.Services
 
                             await TileDownloadService.DownloadAsync(asset.Href, localPath, progress, ct).ConfigureAwait(false);
                             localTileSlots[i] = (localPath, asset.IsCopc);
+                            var done = Interlocked.Increment(ref fetchCompleted);
+                            // Fetch is the first half of overall progress for this mode -- see
+                            // RunProgress's doc comment for why (both phases run sequentially).
+                            runProgress?.Report(new RunProgress { Phase = "Downloading", Completed = done, Total = tiles.Count, OverallFraction = 0.5 * done / tiles.Count });
                         }
                         finally
                         {
@@ -279,9 +313,10 @@ namespace KylidarAddin.Services
                     : $"Converting {localTiles.Count} point cloud tile(s) (up to {MaxTileConvertConcurrency} of {Environment.ProcessorCount} cores)...");
 
                 var outputPaths = localTiles.Select(t => Path.Combine(lasFolder, TileBaseName(t.path) + ".las")).ToList();
+                runProgress?.Report(new RunProgress { Phase = "Converting", Completed = 0, Total = tiles.Count, OverallFraction = 0.5 });
                 try
                 {
-                    await RunPerTileConversionsAsync(localTiles, outputPaths, cropWktParts, progress, ct).ConfigureAwait(false);
+                    await RunPerTileConversionsAsync(localTiles, outputPaths, cropWktParts, progress, runProgress, tiles.Count, ct).ConfigureAwait(false);
                 }
                 catch (PdalStageFailedException ex)
                 {
@@ -334,13 +369,21 @@ namespace KylidarAddin.Services
 
         /// <summary>Run one PDAL process per tile, concurrently (see RunWithAdaptiveConcurrencyAsync
         /// for the concurrency/memory policy). <paramref name="outputPaths"/> is parallel to
-        /// <paramref name="localTiles"/>.</summary>
+        /// <paramref name="localTiles"/>. Converting is the second half of overall progress for
+        /// this mode -- see RunProgress's doc comment.</summary>
         private static Task RunPerTileConversionsAsync(
             IReadOnlyList<(string path, bool isCopc)> localTiles, IReadOnlyList<string> outputPaths,
-            IReadOnlyList<string> cropWktParts, IProgress<string> progress, CancellationToken ct)
+            IReadOnlyList<string> cropWktParts, IProgress<string> progress, IProgress<RunProgress> runProgress,
+            int totalTileCount, CancellationToken ct)
         {
+            int completed = 0;
             var jobs = localTiles.Select((tile, i) =>
-                (Func<Task>)(() => ConvertOneTileAsync(tile, outputPaths[i], cropWktParts, progress, ct)));
+                (Func<Task>)(async () =>
+                {
+                    await ConvertOneTileAsync(tile, outputPaths[i], cropWktParts, progress, ct).ConfigureAwait(false);
+                    var done = Interlocked.Increment(ref completed);
+                    runProgress?.Report(new RunProgress { Phase = "Converting", Completed = done, Total = totalTileCount, OverallFraction = 0.5 + 0.5 * done / totalTileCount });
+                }));
             return RunWithAdaptiveConcurrencyAsync(jobs, MaxTileConvertConcurrency, ct);
         }
 
@@ -422,22 +465,28 @@ namespace KylidarAddin.Services
         /// Build a single-tile PDAL pipeline: read the whole tile (COPC or LAS), optionally crop to
         /// one or more AOI WKT polygon parts, and write to outputPath.
         ///
-        /// COPC tiles crop via readers.copc's own "polygon" option, which takes an ARRAY of separate
-        /// polygon WKT strings (unioned together) -- NOT a single combined MULTIPOLYGON WKT, which
-        /// it rejects as "geometrically invalid". That lets one reader stage do the crop directly.
-        ///
-        /// Plain LAS/LAZ tiles crop via filters.crop instead, whose multi-region semantics differ
-        /// (documented to produce one output point-view PER region, not a union) -- so a multi-part
-        /// AOI needs one filters.crop branch per part off a single reader, recombined via
-        /// filters.merge before the writer.
+        /// Cropping ALWAYS reads via readers.las (even for a .copc.laz tile) and crops via
+        /// filters.crop, never readers.copc's own "polygon" option. readers.las reads a COPC file's
+        /// points just fine -- COPC is a valid LASzip-compressed LAZ 1.4 stream underneath, the
+        /// octree-hierarchy VLRs readers.copc uses for spatially-indexed partial reads are optional
+        /// extra metadata a plain LAZ reader just ignores, decompressing every point regardless
+        /// (verified empirically: identical point count either way) -- and now that every tile is
+        /// always fully downloaded to local disk before PDAL ever touches it (no more COPC
+        /// network-partial-fetch), there's no efficiency reason left to prefer readers.copc's own
+        /// polygon-based filtering. That matters because readers.copc's "polygon" option can flat-out
+        /// CRASH PDAL (a native segfault, not a clean error) on a complex/high-vertex polygon --
+        /// reproduced with a real ~1500-vertex AOI boundary: the identical WKT crops correctly via
+        /// filters.crop, but segfaults via readers.copc's polygon array every time. filters.crop's
+        /// multi-region semantics differ from a single combined polygon anyway (documented to produce
+        /// one output point-view PER region, not a union), so a multi-part AOI needs one filters.crop
+        /// branch per part off a single reader, recombined via filters.merge before the writer.
         ///
         /// cropWktParts are always in WGS84 (see PrepareAoi/GeoJsonConverter.ToWktParts), not the
-        /// tile's own CRS (a Kentucky State Plane variant, in feet). Both crop mechanisms otherwise
-        /// assume the polygon is in the SAME CRS as the point data, so the WGS84 lon/lat coordinates
-        /// must be tagged explicitly or every point silently fails the crop (verified empirically):
-        /// readers.copc's "polygon" option takes the CRS as a "/EPSG:xxxx" suffix appended directly
-        /// to each WKT string; filters.crop instead needs a separate "a_srs" option (the same suffix
-        /// syntax there is silently ignored, still cropping against the tile's native CRS).
+        /// tile's own CRS (a Kentucky State Plane variant, in feet). filters.crop otherwise assumes
+        /// the polygon is in the SAME CRS as the point data, so each crop stage passes an explicit
+        /// "a_srs":"EPSG:4326" -- verified empirically that omitting it makes every point silently
+        /// fail the crop, producing an empty .las whose degenerate (0,0) extent then displays
+        /// thousands of miles from Kentucky.
         /// </summary>
         private static string BuildSingleTileConvertPipelineJson(
             string tilePath, bool isCopc, string outputPath, IReadOnlyList<string> cropWktParts)
@@ -454,19 +503,7 @@ namespace KylidarAddin.Services
                 const string readTag = "read";
                 string finalInputTag = readTag;
 
-                if (clip && isCopc)
-                {
-                    w.WriteStartObject();
-                    w.WriteString("type", "readers.copc");
-                    w.WriteString("filename", tilePath);
-                    w.WritePropertyName("polygon");
-                    w.WriteStartArray();
-                    foreach (var wkt in cropWktParts) w.WriteStringValue(wkt + "/EPSG:4326");
-                    w.WriteEndArray();
-                    w.WriteString("tag", readTag);
-                    w.WriteEndObject();
-                }
-                else if (clip)
+                if (clip)
                 {
                     w.WriteStartObject();
                     w.WriteString("type", "readers.las");

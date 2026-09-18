@@ -8,6 +8,11 @@
  * The output/dataset choices are all made up front, before Run, rather than prompted for afterward
  * -- RunAsync executes the whole chosen pipeline in one pass.
  *
+ * "Add hydro-enforced breaklines" (only meaningful with a LAS dataset) downloads the Phase 2/3
+ * breaklines inside the search polygon, clips them to it, and adds them to the dataset as a
+ * Hard_Line surface constraint -- see BreaklineService. It's best-effort: if the download or write
+ * fails, the run continues and the dataset is built without the constraint.
+ *
  * "Clip to area of interest" crops each tile to the AOI (plus an optional buffer -- see
  * CopcClipService.PrepareAoi) during conversion; it only affects the two convert output modes,
  * since the "download COPC only" mode never runs PDAL. A drawn/selected polygon AOI with holes,
@@ -321,6 +326,7 @@ namespace KylidarAddin
                 NotifyPropertyChanged(nameof(ShowNewDatasetPath));
                 NotifyPropertyChanged(nameof(ShowExistingDatasetPath));
                 NotifyPropertyChanged(nameof(CanBuildPyramids));
+                NotifyPropertyChanged(nameof(CanAddBreaklines));
                 NotifyPropertyChanged(nameof(IsDatasetActionNoneSelected));
                 NotifyPropertyChanged(nameof(IsDatasetActionCreateNewSelected));
                 NotifyPropertyChanged(nameof(IsDatasetActionAddExistingSelected));
@@ -368,6 +374,13 @@ namespace KylidarAddin
         private bool _buildPyramids;
         public bool BuildPyramids { get => _buildPyramids; set => SetProperty(ref _buildPyramids, value); }
 
+        private bool _addBreaklines;
+        /// <summary>Whether to add the hydro-enforced breaklines as a surface constraint. Only takes
+        /// effect with a LAS dataset (see CanAddBreaklines) -- the constraint lives in the dataset.</summary>
+        public bool AddBreaklines { get => _addBreaklines; set => SetProperty(ref _addBreaklines, value); }
+
+        public bool CanAddBreaklines => SelectedDatasetAction != DatasetAction.None;
+
         private static string DefaultNewDatasetPath() =>
             Path.Combine(Path.GetTempPath(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}.lasd");
 
@@ -401,12 +414,56 @@ namespace KylidarAddin
         public bool IsRunning
         {
             get => _isRunning;
-            set => SetProperty(ref _isRunning, value);
+            set
+            {
+                SetProperty(ref _isRunning, value);
+                NotifyPropertyChanged(nameof(ShowRunProgressBar));
+                NotifyPropertyChanged(nameof(ShowIndeterminateProgressBar));
+            }
         }
 
         public ObservableCollection<string> LogLines { get; } = new ObservableCollection<string>();
 
         private CancellationTokenSource _cts;
+
+        // Aggregate run progress (see CopcClipService.RunProgress) -- a tqdm-style bar below the
+        // line-by-line log, rather than making anyone read scrolling "Downloading X: N MB (P%)"
+        // lines to gauge how far along the whole run is.
+        private RunProgress _runProgress;
+        private Stopwatch _runStopwatch;
+
+        /// <summary>Shown once the tile count is known (after the STAC search); before that, and
+        /// while idle, ShowIndeterminateProgressBar covers it instead.</summary>
+        public bool ShowRunProgressBar => IsRunning && _runProgress.Total > 0;
+        public bool ShowIndeterminateProgressBar => IsRunning && _runProgress.Total == 0;
+        public double RunProgressFraction => _runProgress.OverallFraction;
+
+        public string RunProgressText => _runProgress.Total == 0
+            ? string.Empty
+            : $"{_runProgress.Phase}: {_runProgress.Completed} / {_runProgress.Total} ({_runProgress.OverallFraction * 100:F0}%){FormatEta()}";
+
+        private void SetRunProgress(RunProgress p)
+        {
+            _runProgress = p;
+            NotifyPropertyChanged(nameof(ShowRunProgressBar));
+            NotifyPropertyChanged(nameof(ShowIndeterminateProgressBar));
+            NotifyPropertyChanged(nameof(RunProgressFraction));
+            NotifyPropertyChanged(nameof(RunProgressText));
+        }
+
+        /// <summary>Simple linear ETA from elapsed time and how far OverallFraction has gotten --
+        /// the same estimate tqdm itself uses. Blank until there's at least a couple seconds of
+        /// data to extrapolate from, so early jitter (one fast/slow tile) doesn't flash a wild
+        /// number.</summary>
+        private string FormatEta()
+        {
+            var frac = _runProgress.OverallFraction;
+            if (frac <= 0 || frac >= 1 || _runStopwatch == null) return string.Empty;
+            var elapsed = _runStopwatch.Elapsed.TotalSeconds;
+            if (elapsed < 2) return string.Empty;
+            var remaining = TimeSpan.FromSeconds(elapsed * (1 - frac) / frac);
+            return $" · ETA {FormatDuration(remaining)}";
+        }
 
         public ICommand RunCommand => new RelayCommand(async () => await RunAsync(), CanRun);
         public ICommand CancelCommand => new RelayCommand(() => _cts?.Cancel(), () => IsRunning);
@@ -479,27 +536,84 @@ namespace KylidarAddin
                     return;
                 }
 
-                var script = ExportScriptService.BuildScript(
-                    dlg.SelectedFormat, tileUrls, dlg.DestinationFolder, convert, discardRaw, aoiInfo.CropWktParts);
-
-                var ext = dlg.SelectedFormat switch
+                string outputPath;
+                if (dlg.SelectedFormat == ExportScriptFormat.Executable)
                 {
-                    ExportScriptFormat.Notebook => ".ipynb",
-                    ExportScriptFormat.PowerShell => ".ps1",
-                    ExportScriptFormat.Shell => ".sh",
-                    _ => ".py"
-                };
-                var scriptPath = Path.Combine(dlg.DestinationFolder, $"kylidar_export_{DateTime.Now:yyyyMMdd_HHmmss}{ext}");
-                await File.WriteAllTextAsync(scriptPath, script);
+                    // The exe is a separate console project (tools\KylidarDownloader\), pre-built
+                    // and bundled into this add-in's own package -- see the Content item in
+                    // KylidarAddin.csproj -- so it lands right next to this assembly on disk.
+                    var sourceExe = Path.Combine(
+                        Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "",
+                        "KylidarDownloader.exe");
+                    if (!File.Exists(sourceExe))
+                    {
+                        ExportScriptStatusText = "Could not find the bundled KylidarDownloader.exe alongside this add-in.";
+                        return;
+                    }
+                    var destExe = Path.Combine(dlg.DestinationFolder, $"kylidar_export_{DateTime.Now:yyyyMMdd_HHmmss}.exe");
+                    File.Copy(sourceExe, destExe, overwrite: true);
+
+                    // Append the manifest straight onto the copied exe (see AppendEmbeddedManifest)
+                    // instead of writing a sidecar .json -- Export Script's "Executable" option
+                    // then produces exactly one file, matching what a plain "download exe" implies.
+                    AppendEmbeddedManifest(destExe, BuildDownloaderManifest(tileUrls, dlg.DestinationFolder, convert, discardRaw, aoiInfo.CropWktParts));
+                    outputPath = destExe;
+                }
+                else
+                {
+                    var script = ExportScriptService.BuildScript(
+                        dlg.SelectedFormat, tileUrls, dlg.DestinationFolder, convert, discardRaw, aoiInfo.CropWktParts);
+
+                    var ext = dlg.SelectedFormat switch
+                    {
+                        ExportScriptFormat.Notebook => ".ipynb",
+                        ExportScriptFormat.PowerShell => ".ps1",
+                        ExportScriptFormat.Shell => ".sh",
+                        _ => ".py"
+                    };
+                    var scriptPath = Path.Combine(dlg.DestinationFolder, $"kylidar_export_{DateTime.Now:yyyyMMdd_HHmmss}{ext}");
+                    await File.WriteAllTextAsync(scriptPath, script);
+                    outputPath = scriptPath;
+                }
 
                 ExportScriptStatusText = hitLimit
-                    ? $"Exported {tileUrls.Count}-tile script to {scriptPath} -- hit the {searchLimit}-tile search limit, there may be more. Raise the limit and export again for the rest."
-                    : $"Exported {tileUrls.Count}-tile script to {scriptPath}.";
+                    ? $"Exported {tileUrls.Count}-tile script to {outputPath} -- hit the {searchLimit}-tile search limit, there may be more. Raise the limit and export again for the rest."
+                    : $"Exported {tileUrls.Count}-tile script to {outputPath}.";
             }
             catch (Exception ex)
             {
                 ExportScriptStatusText = "Could not export script: " + ex.Message;
             }
+        }
+
+        /// <summary>Manifest consumed by the bundled KylidarDownloader.exe (tools\KylidarDownloader\Program.cs).</summary>
+        private static string BuildDownloaderManifest(
+            IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts)
+        {
+            var manifest = new
+            {
+                destFolder,
+                convert,
+                discardRaw,
+                cropWktParts = cropWktParts ?? Array.Empty<string>(),
+                tiles = tileUrls
+            };
+            return System.Text.Json.JsonSerializer.Serialize(manifest);
+        }
+
+        // Must match KylidarDownloader's read side (tools\KylidarDownloader\Program.cs,
+        // TryReadEmbeddedManifest) exactly: 8-byte ASCII magic at EOF, preceded by the 8-byte
+        // little-endian byte-length of the JSON payload, which sits right before that.
+        private static readonly byte[] ManifestFooterMagic = System.Text.Encoding.ASCII.GetBytes("KYLDMAN1");
+
+        /// <summary>Append a manifest payload to a copy of KylidarDownloader.exe so it's a single, self-contained file (see ManifestFooterMagic).</summary>
+        private static void AppendEmbeddedManifest(string exePath, string manifestJson)
+        {
+            var jsonBytes = System.Text.Encoding.UTF8.GetBytes(manifestJson);
+            using var fs = new FileStream(exePath, FileMode.Append, FileAccess.Write);
+            fs.Write(jsonBytes, 0, jsonBytes.Length);
+            fs.Write(BitConverter.GetBytes((long)jsonBytes.Length), 0, 8);
+            fs.Write(ManifestFooterMagic, 0, ManifestFooterMagic.Length);
         }
 
         private bool CanRun() => !IsRunning && !IsSearching;
@@ -540,28 +654,65 @@ namespace KylidarAddin
                 return;
             }
 
+            // Checked-but-disabled (dataset action None) is treated as off, not as an error.
+            var wantBreaklines = AddBreaklines && CanAddBreaklines;
+            if (wantBreaklines)
+            {
+                // Checked here, before any download starts, so a bad combination fails fast.
+                if (!Phase2 && !Phase3)
+                {
+                    ValidationText = "Hydro-enforced breaklines exist for Phase 2 and Phase 3 only -- select one of them, or turn breaklines off.";
+                    return;
+                }
+                if (AoiState.Current is not Polygon && !(ClipToAoi && TryGetBufferFeet(out _)))
+                {
+                    ValidationText = "Breaklines are clipped to the AOI, so they need a polygon AOI, or \"Clip to area of interest\" with a buffer.";
+                    return;
+                }
+            }
+
             LogLines.Clear();
             IsRunning = true;
             _cts = new CancellationTokenSource();
             var progress = new Progress<string>(msg => LogLines.Add(msg));
-            var runStopwatch = Stopwatch.StartNew();
+            var runProgress = new Progress<RunProgress>(SetRunProgress);
+            SetRunProgress(default); // Total=0 -- shows the indeterminate bar until the search resolves a tile count
+            _runStopwatch = Stopwatch.StartNew();
 
             ClipResult result = null;
+            string surfaceConstraint = null;
             try
             {
                 var aoi = AoiState.Current;
                 var bufferFeet = TryGetBufferFeet(out var bf) ? bf : 0;
                 var clipToAoi = ClipToAoi;
-                var aoiInfo = await QueuedTask.Run(() => CopcClipService.PrepareAoi(aoi, clipToAoi, bufferFeet));
+                BreaklineRegion breaklineRegion = null;
+                var aoiInfo = await QueuedTask.Run(() =>
+                {
+                    var info = CopcClipService.PrepareAoi(aoi, clipToAoi, bufferFeet);
+                    if (wantBreaklines) breaklineRegion = BreaklineService.PrepareRegion(info.SearchGeometry);
+                    return info;
+                });
                 var searchLimit = GetSearchLimit();
                 if (SelectedOutputMode == OutputMode.DownloadCopcOnly)
                 {
-                    result = await CopcClipService.DownloadTilesOnlyAsync(aoiInfo.GeoJson, collections, OutputFolder, progress, searchLimit, _cts.Token);
+                    result = await CopcClipService.DownloadTilesOnlyAsync(aoiInfo.GeoJson, collections, OutputFolder, progress, runProgress, searchLimit, _cts.Token);
                 }
                 else
                 {
                     bool keepRawCopc = SelectedOutputMode == OutputMode.ConvertKeepCopc;
-                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, collections, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, progress, searchLimit, _cts.Token);
+                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, collections, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, progress, runProgress, searchLimit, _cts.Token);
+                }
+
+                // After the point data so a breakline problem can't cost the tiles; still inside
+                // the try so Cancel works and IsRunning stays true until it's done.
+                if (result.Success && breaklineRegion != null)
+                {
+                    var phases = new List<int>();
+                    if (Phase1) phases.Add(1);
+                    if (Phase2) phases.Add(2);
+                    if (Phase3) phases.Add(3);
+                    surfaceConstraint = await BuildBreaklineConstraintAsync(breaklineRegion, phases, OutputFolder, progress, _cts.Token);
                 }
             }
             catch (OperationCanceledException)
@@ -580,25 +731,64 @@ namespace KylidarAddin
 
             if (result == null)
             {
-                LogLines.Add($"Total time: {FormatDuration(runStopwatch.Elapsed)}");
+                LogLines.Add($"Total time: {FormatDuration(_runStopwatch.Elapsed)}");
                 return;
             }
 
             if (!result.Success)
             {
                 LogLines.Add("Failed: " + result.Error);
-                LogLines.Add($"Total time: {FormatDuration(runStopwatch.Elapsed)}");
+                LogLines.Add($"Total time: {FormatDuration(_runStopwatch.Elapsed)}");
                 return;
             }
 
             var lasFolderMsg = SelectedOutputMode == OutputMode.ConvertKeepCopc
                 ? Path.Combine(OutputFolder, "LAS")
                 : OutputFolder;
-            LogLines.Add($"Done: {result.OutputPaths.Count} file(s) written to {lasFolderMsg} ({FormatDuration(runStopwatch.Elapsed)} so far).");
+            LogLines.Add($"Done: {result.OutputPaths.Count} file(s) written to {lasFolderMsg} ({FormatDuration(_runStopwatch.Elapsed)} so far).");
 
-            await AddToLasDatasetAsync(result.OutputPaths, progress);
+            await AddToLasDatasetAsync(result.OutputPaths, progress, surfaceConstraint);
 
-            LogLines.Add($"Total time: {FormatDuration(runStopwatch.Elapsed)}");
+            LogLines.Add($"Total time: {FormatDuration(_runStopwatch.Elapsed)}");
+        }
+
+        /// <summary>
+        /// Download + clip + write the breaklines, returning the surface-constraint argument for the
+        /// LAS dataset tools, or null (after logging why) when there's nothing to add. Best-effort:
+        /// anything but cancellation is logged and swallowed so the point data still gets its dataset.
+        /// </summary>
+        private async Task<string> BuildBreaklineConstraintAsync(
+            BreaklineRegion region, IReadOnlyCollection<int> phases, string outputFolder, IProgress<string> progress, CancellationToken ct)
+        {
+            try
+            {
+                progress.Report("Downloading hydro-enforced breaklines...");
+                var fetched = await BreaklineService.FetchAsync(region, phases, progress, ct);
+                foreach (var note in fetched.Notes) progress.Report(note);
+                if (fetched.Lines.Count == 0)
+                {
+                    progress.Report("No usable breaklines in the AOI -- the LAS dataset will be built without a surface constraint.");
+                    return null;
+                }
+
+                var written = await QueuedTask.Run(() => BreaklineService.WriteFeatureClass(region, fetched.Lines, outputFolder));
+                if (written.FeatureCount == 0)
+                {
+                    progress.Report("Breaklines were found but none fall inside the clip area -- no surface constraint added.");
+                    return null;
+                }
+                progress.Report($"Wrote {written.FeatureCount} clipped breakline(s) to {written.FeatureClassPath}.");
+                return BreaklineService.ToConstraintArgument(written.FeatureClassPath);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                progress.Report("Breaklines skipped -- " + ex.Message);
+                return null;
+            }
         }
 
         private static string FormatDuration(TimeSpan elapsed) =>
@@ -608,7 +798,7 @@ namespace KylidarAddin
         /// Post-clip dataset step, now chosen up front (SelectedDatasetAction/BuildPyramids)
         /// instead of prompted for after the clip finishes.
         /// </summary>
-        private async Task AddToLasDatasetAsync(IReadOnlyList<string> lasPaths, IProgress<string> progress)
+        private async Task AddToLasDatasetAsync(IReadOnlyList<string> lasPaths, IProgress<string> progress, string surfaceConstraint)
         {
             if (SelectedDatasetAction == DatasetAction.None) return;
 
@@ -619,12 +809,12 @@ namespace KylidarAddin
             if (SelectedDatasetAction == DatasetAction.CreateNew)
             {
                 datasetPath = NewDatasetPath;
-                ok = await LasDatasetService.CreateLasDatasetAsync(lasList, datasetPath, progress);
+                ok = await LasDatasetService.CreateLasDatasetAsync(lasList, datasetPath, progress, surfaceConstraint);
             }
             else
             {
                 datasetPath = ExistingDatasetPath;
-                ok = await LasDatasetService.AddFilesToLasDatasetAsync(datasetPath, lasList, progress);
+                ok = await LasDatasetService.AddFilesToLasDatasetAsync(datasetPath, lasList, progress, surfaceConstraint);
             }
 
             if (!ok)
@@ -632,7 +822,7 @@ namespace KylidarAddin
                 LogLines.Add("Failed to " + (SelectedDatasetAction == DatasetAction.CreateNew ? "create" : "update") + " the LAS dataset.");
                 return;
             }
-            LogLines.Add($"LAS dataset {(SelectedDatasetAction == DatasetAction.CreateNew ? "created" : "updated")} ({FormatDuration(datasetStopwatch.Elapsed)}).");
+            LogLines.Add($"LAS dataset {(SelectedDatasetAction == DatasetAction.CreateNew ? "created" : "updated")}{(surfaceConstraint != null ? " with breakline surface constraint" : "")} ({FormatDuration(datasetStopwatch.Elapsed)}).");
 
             if (BuildPyramids)
             {

@@ -17,10 +17,14 @@ namespace KylidarAddin.Services
 {
     public static class LasDatasetService
     {
-        /// <summary>Create a new .lasd containing the given .las file(s).</summary>
-        public static async Task<bool> CreateLasDatasetAsync(string lasPaths, string lasdPath, IProgress<string> progress)
+        /// <summary>Create a new .lasd containing the given .las file(s), optionally with a surface
+        /// constraint (see BreaklineService.ToConstraintArgument). The constraint is the 4th
+        /// positional parameter of both LAS dataset tools, after the folder-recursion flag.</summary>
+        public static async Task<bool> CreateLasDatasetAsync(string lasPaths, string lasdPath, IProgress<string> progress, string surfaceConstraint = null)
         {
-            var args = Geoprocessing.MakeValueArray(lasPaths, lasdPath);
+            var args = surfaceConstraint == null
+                ? Geoprocessing.MakeValueArray(lasPaths, lasdPath)
+                : Geoprocessing.MakeValueArray(lasPaths, lasdPath, "NO_RECURSION", surfaceConstraint);
             var result = await Geoprocessing.ExecuteToolAsync("CreateLasDataset_management", args,
                 environments: null, flags: GPExecuteToolFlags.None).ConfigureAwait(false);
             if (result.IsFailed)
@@ -31,10 +35,12 @@ namespace KylidarAddin.Services
             return true;
         }
 
-        /// <summary>Append .las file(s) to an existing .lasd.</summary>
-        public static async Task<bool> AddFilesToLasDatasetAsync(string lasdPath, string lasPaths, IProgress<string> progress)
+        /// <summary>Append .las file(s) to an existing .lasd, optionally with a surface constraint.</summary>
+        public static async Task<bool> AddFilesToLasDatasetAsync(string lasdPath, string lasPaths, IProgress<string> progress, string surfaceConstraint = null)
         {
-            var args = Geoprocessing.MakeValueArray(lasdPath, lasPaths);
+            var args = surfaceConstraint == null
+                ? Geoprocessing.MakeValueArray(lasdPath, lasPaths)
+                : Geoprocessing.MakeValueArray(lasdPath, lasPaths, "NO_RECURSION", surfaceConstraint);
             var result = await Geoprocessing.ExecuteToolAsync("AddFilesToLasDataset_management", args,
                 environments: null, flags: GPExecuteToolFlags.None).ConfigureAwait(false);
             if (result.IsFailed)

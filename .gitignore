@@ -33,3 +33,11 @@ aprx*
 # GitHub Actions workflow (.github/workflows/docs.yml) builds and deploys docs/ to GitHub
 # Pages -- it's never committed.
 docs/
+# Pre-built stand-alone downloader bundled into the add-in (see KylidarAddin.csproj) -- the one
+# build output that IS committed, so a fresh clone can build the add-in without first publishing
+# tools\KylidarDownloader. Everything else under that project's bin/obj stays ignored.
+!tools/KylidarDownloader/bin/
+tools/KylidarDownloader/bin/*
+!tools/KylidarDownloader/bin/publish-win-x64/
+tools/KylidarDownloader/bin/publish-win-x64/*
+!tools/KylidarDownloader/bin/publish-win-x64/KylidarDownloader.exe

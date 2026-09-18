@@ -53,6 +53,25 @@ times in a row, which points at a degenerate buffer rather than a STAC API probl
 looks correct and well-formed, it may be worth checking the STAC catalog's own `intersects` schema
 for what geometry types it actually accepts.
 
+## Breaklines weren't added to the LAS dataset
+
+Breaklines are best-effort: the run still finishes and the dataset is built without them, and the
+progress log says why. Common reasons:
+
+- **"Phase N breaklines have no elevation (Z) values"** -- only Phase 2 and Phase 3 breaklines carry Z;
+  Phase 1's don't, so they can't be a constraint.
+- **"No usable breaklines in the AOI"** -- none intersect the AOI (or the AOI plus buffer). Not every
+  area has hydro-enforced breaklines, and Phase 3 coverage in particular is partial.
+- **Run stops at validation** -- breaklines need a polygon AOI, or *Clip to area of interest* with a
+  buffer, since that polygon is what they're clipped to. They also need Phase 2 or 3 selected and a
+  LAS dataset option (*Create new* or *Add to existing*).
+- **A download error** -- the breakline services are separate from the STAC catalog; a network or
+  service hiccup skips just the breaklines. Run again to retry.
+
+The breaklines are also stored in a `breaklines_<timestamp>.gdb` in the output folder that the
+dataset references -- if the dataset shows no constraint after you moved or deleted the output
+folder, that geodatabase is what went missing.
+
 ## Run/Search Catalog/Export Script stays disabled
 
 These require an AOI (draw or select one first). If you just finished drawing/selecting an AOI and

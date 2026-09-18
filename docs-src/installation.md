@@ -43,6 +43,13 @@ Manager flow.
 4. Press **F5** (or **Start**) to launch ArcGIS Pro with the add-in already loaded, or just open
    ArcGIS Pro normally -- once built, the add-in stays registered.
 
+!!! note "Bundled downloader exe"
+    The add-in packages a pre-built `KylidarDownloader.exe` (the stand-alone downloader behind
+    Export Script's **Executable** option) from `tools\KylidarDownloader\bin\publish-win-x64\`. It's
+    committed to the repo, so a normal build just works. Only rebuild it if you change that
+    project's source: in `tools\KylidarDownloader`, run
+    `dotnet publish -c Release -r win-x64 -o bin\publish-win-x64`.
+
 !!! warning "Build with Visual Studio's MSBuild, not `dotnet build`"
     The ArcGIS Pro SDK's packaging step uses `CodeTaskFactory`, which the .NET (Core) MSBuild
     used by `dotnet build` doesn't support. From the command line, build with:

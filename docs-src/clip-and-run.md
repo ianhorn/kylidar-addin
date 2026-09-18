@@ -81,10 +81,34 @@ the old per-run prompt, this choice is made up front:
 speeds up display of the dataset in the map, but can add significantly more time to processing --
 hence the label and the **i** button explaining the tradeoff.
 
+### Hydro-enforced breaklines
+
+**Add hydro-enforced breaklines** (available once a dataset option is selected) downloads the
+KyFromAbove hydro-enforced breaklines inside the AOI and adds them to the LAS dataset as a
+`Hard_Line` surface constraint, so lakes, ponds, streams and bridges are enforced when the dataset
+is triangulated into a surface.
+
+- **Phase 2 and Phase 3 only.** The Phase 1 breaklines service has no elevation (Z) values, so it
+  can't be used as a constraint (Phase 1 is also not selectable in Kylidar, see above).
+- **Clipped to the AOI.** The breaklines are clipped to the same polygon used to find tiles -- your
+  AOI, or the AOI plus buffer when *Clip to area of interest* has a buffer -- so this needs a
+  **polygon AOI**, or clipping with a buffer. Note the point cloud itself is only cropped when
+  *Clip to area of interest* is on; with clipping off you get whole tiles but breaklines only inside
+  the AOI.
+- **Reprojected to EPSG:3089.** The services are Web Mercator; Kylidar converts them to Kentucky
+  Single Zone (ftUS) to match the tiles, using ArcGIS Pro's default datum transformation (about 3 ft
+  different from a naive conversion, and the one that lines up with the LiDAR). Z is already in
+  feet.
+- **Where they go.** The clipped lines are written to a `breaklines_<timestamp>.gdb` (feature class
+  `Breaklines`, with `BL_TYPE` and `PHASE` fields) in the output folder. The dataset references that
+  geodatabase, so keep it alongside the dataset.
+- **Best effort.** If the breakline download fails, or none fall inside the AOI, the log says why and
+  the dataset is still built without the constraint.
+
 ## Run / Cancel
 
 **Run** requires an AOI, at least one LiDAR phase, and an output folder (plus a dataset path if
-you've chosen to create/add to one). It's disabled while a run or a catalog search is already in
+you've chosen to create/add to one, and -- if breaklines are on -- Phase 2 or 3 plus a polygon AOI or a clip buffer). It's disabled while a run or a catalog search is already in
 progress.
 
 Click **Run** to start the search-download-convert pipeline; click **Cancel** to stop an
@@ -102,10 +126,14 @@ running on another machine, or scheduling for later. Choose a format and a desti
   Colab; the same logic as the Python script, split into cells (config, helpers, run).
 - **PowerShell script (.ps1)** -- Windows only, no install needed.
 - **Shell script (.sh)** -- macOS/Linux/WSL, needs `curl`.
+- **Executable (.exe)** -- Windows only; a single, self-contained file (the tile list and settings are
+  embedded in it) that you just double-click, with no Python or .NET install. It is the add-in's bundled
+  `KylidarDownloader.exe` with your manifest appended.
 
-Every format needs the `pdal` CLI on the machine that runs it if the output mode converts to
-`.las`. LAS dataset creation/pyramids are **not** included -- that's an ArcGIS Pro/arcpy-only step;
-add the `.las` output to a dataset from within Pro afterward if needed.
+Every format, the executable included, needs the `pdal` CLI on the machine that runs it if the
+output mode converts to `.las`. LAS dataset creation/pyramids and breaklines are **not** included --
+those are ArcGIS Pro/arcpy-only steps; add the `.las` output to a dataset from within Pro afterward
+if needed.
 
 ## Progress log
 

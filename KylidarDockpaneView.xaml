@@ -133,6 +133,12 @@
                         ToolTip="Speeds up display of the dataset in the map, but can add significantly more time to processing."/>
             </StackPanel>
 
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                <CheckBox Content="Add hydro-enforced breaklines" IsChecked="{Binding AddBreaklines}" IsEnabled="{Binding CanAddBreaklines}" VerticalAlignment="Center"/>
+                <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                        ToolTip="Downloads the KyFromAbove hydro-enforced breaklines inside the AOI (Phase 2 and 3; Phase 1 has no elevation values), clips them to it (the AOI plus buffer when clipping), reprojects to EPSG:3089, and adds them to the LAS dataset as a Hard_Line surface constraint. Needs a polygon AOI, or 'Clip to area of interest' with a buffer. If the download fails, the dataset is still built without them."/>
+            </StackPanel>
+
             <TextBlock Text="{Binding ValidationText}" Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,6"/>
 
             <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
@@ -143,10 +149,8 @@
             </StackPanel>
             <TextBlock Text="{Binding ExportScriptStatusText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
 
-            <ProgressBar IsIndeterminate="True" Height="14" Margin="0,0,0,8" Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"/>
-
             <TextBlock Text="Progress" FontWeight="Bold" Margin="0,0,0,4"/>
-            <ListBox ItemsSource="{Binding LogLines}" Height="160" FontFamily="Consolas" FontSize="11" Margin="0,0,0,10"
+            <ListBox ItemsSource="{Binding LogLines}" Height="160" FontFamily="Consolas" FontSize="11" Margin="0,0,0,4"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
@@ -159,6 +163,17 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
+
+            <!-- Aggregate progress across the whole tile set (tqdm-style), below the scrolling log
+                 above rather than making anyone read individual "Downloading X: N MB (P%)" lines to
+                 gauge how far along the run is overall. Indeterminate until the STAC search resolves
+                 a tile count, then a determinate bar + phase/count/percentage/ETA text. -->
+            <ProgressBar Height="14" Margin="0,0,0,2" Minimum="0" Maximum="1" Value="{Binding RunProgressFraction, Mode=OneWay}"
+                         Visibility="{Binding ShowRunProgressBar, Converter={StaticResource BoolToVis}}"/>
+            <TextBlock Text="{Binding RunProgressText}" FontFamily="Consolas" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"
+                       Visibility="{Binding ShowRunProgressBar, Converter={StaticResource BoolToVis}}"/>
+            <ProgressBar IsIndeterminate="True" Height="14" Margin="0,0,0,10"
+                         Visibility="{Binding ShowIndeterminateProgressBar, Converter={StaticResource BoolToVis}}"/>
 
         </StackPanel>
     </ScrollViewer>

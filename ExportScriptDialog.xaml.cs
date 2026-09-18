@@ -1,8 +1,9 @@
 /*
- * Modal dialog for "Export Script": lets the user pick the output script language (Python,
- * PowerShell, or shell) and the destination folder before KylidarDockpaneViewModel actually
- * writes the kit. Modeled directly on kyfromabove-ext's ExportScriptDialog -- no "Executable"
- * option here, since (unlike that add-in) this one has no bundled downloader .exe project to copy.
+ * Modal dialog for "Export Script": lets the user pick the output format (Python, Jupyter
+ * notebook, PowerShell, shell, or a stand-alone executable) and the destination folder before
+ * KylidarDockpaneViewModel actually writes the kit. Modeled directly on kyfromabove-ext's
+ * ExportScriptDialog -- including the "Executable" option, backed by this add-in's own
+ * tools\KylidarDownloader\ (extended with the convert/crop step that add-in has no need for).
  */
 using System.Collections.Generic;
 using System.IO;
@@ -20,7 +21,8 @@ namespace KylidarAddin
             ["Python"] = "Needs Python 3 on the machine that runs it.",
             ["Notebook"] = "Runs in Jupyter/JupyterLab, VS Code's notebook viewer, or Google Colab.",
             ["PowerShell"] = "Windows only, no install needed.",
-            ["Shell"] = "macOS/Linux/WSL. Needs curl."
+            ["Shell"] = "macOS/Linux/WSL. Needs curl.",
+            ["Executable"] = "No install needed. Windows only. A single, self-contained .exe -- double-click to run."
         };
 
         private static readonly SolidColorBrush SelectedBackground = new(Color.FromRgb(0x00, 0x78, 0xD7));
@@ -51,6 +53,7 @@ namespace KylidarAddin
                     "Notebook" => ExportScriptFormat.Notebook,
                     "PowerShell" => ExportScriptFormat.PowerShell,
                     "Shell" => ExportScriptFormat.Shell,
+                    "Executable" => ExportScriptFormat.Executable,
                     _ => ExportScriptFormat.Python
                 };
             }

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Stand-alone downloader/converter bundled into the add-in package (see the Content item in
+    ..\..\KylidarAddin.csproj) and offered as the "Executable (.exe)" option in Export Script.
+    Reads its manifest (see TryReadEmbeddedManifest) and downloads, then optionally converts/crops
+    via the "pdal" CLI, every listed tile: no ArcGIS Pro, and (published self-contained/single-file,
+    as the add-in bundles it) no .NET runtime install, required on the machine that runs it. Modeled
+    directly on kyfromabove-ext's own tools\KyFromAboveDownloader\ (same add-in family, same
+    embedded-manifest trick), extended with the convert/crop step that add-in has no need for.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>KylidarDownloader</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    Publish settings for the bundled binary (Export Script expects a single portable win-x64 exe).
+    Rebuild it with:
+        dotnet publish -c Release -r win-x64 -o bin\publish-win-x64
+    Trimming is safe here: JSON (de)serialization uses the source-generated ManifestJsonContext,
+    not reflection, so nothing trims away.
+  -->
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+  </PropertyGroup>
+
+</Project>

@@ -30,6 +30,8 @@ by a [STAC API](https://github.com/radiantearth/stac-api-spec) and [PDAL](https:
   cancel button and per-step timing.
 - **Add to LAS dataset**: fold the output `.las` file(s) straight into a new or existing `.lasd`,
   optionally build pyramids, and add it to the map.
+- **Hydro-enforced breaklines**: optionally download the Phase 2/3 breaklines inside the AOI, clip
+  and reproject them to EPSG:3089, and add them to the LAS dataset as a surface constraint.
 
 ## Where to start
 

@@ -67,6 +67,9 @@
             <Button x:Name="ShellButton" Tag="Shell" Content="Shell script (.sh)" Click="FormatButton_Click"
                     HorizontalContentAlignment="Left" Padding="8,4" Margin="0,0,0,2"
                     Background="White" Foreground="Black" BorderBrush="Gray"/>
+            <Button x:Name="ExecutableButton" Tag="Executable" Content="Executable (.exe)" Click="FormatButton_Click"
+                    HorizontalContentAlignment="Left" Padding="8,4" Margin="0,0,0,2"
+                    Background="White" Foreground="Black" BorderBrush="Gray"/>
         </StackPanel>
         <TextBlock Grid.Row="3" x:Name="FormatHintText" Foreground="#555555" FontStyle="Italic" FontSize="11" Margin="0,2,0,10"/>
 
