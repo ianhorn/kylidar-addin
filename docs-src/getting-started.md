@@ -37,4 +37,6 @@ alongside the Contents pane by default) that stays open as you work.
 !!! tip "Running without ArcGIS Pro"
     Click **Export Script...** instead of **Run** to write a stand-alone download/convert script
     for the current AOI's tiles -- useful for very large batches, running on another machine, or
-    scheduling for later. See [Export Script](clip-and-run.md#export-script).
+    scheduling for later. See [Export Script](clip-and-run.md#export-script), and
+    [Running an exported script](clip-and-run.md#running-an-exported-script) for how to launch
+    each format.

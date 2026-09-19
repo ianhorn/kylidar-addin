@@ -124,16 +124,49 @@ running on another machine, or scheduling for later. Choose a format and a desti
 - **Python script (.py)** -- needs Python 3 on the machine that runs it.
 - **Jupyter notebook (.ipynb)** -- runs in Jupyter/JupyterLab, VS Code's notebook viewer, or Google
   Colab; the same logic as the Python script, split into cells (config, helpers, run).
-- **PowerShell script (.ps1)** -- Windows only, no install needed.
+- **PowerShell script (.ps1)** -- Windows only, nothing to install.
 - **Shell script (.sh)** -- macOS/Linux/WSL, needs `curl`.
-- **Executable (.exe)** -- Windows only; a single, self-contained file (the tile list and settings are
-  embedded in it) that you just double-click, with no Python or .NET install. It is the add-in's bundled
+- **Executable (.exe)** -- Windows only; a single, self-contained file (the tile list and settings
+  are embedded in it), with no Python or .NET install. It is the add-in's bundled
   `KylidarDownloader.exe` with your manifest appended.
 
-Every format, the executable included, needs the `pdal` CLI on the machine that runs it if the
-output mode converts to `.las`. LAS dataset creation/pyramids and breaklines are **not** included --
-those are ArcGIS Pro/arcpy-only steps; add the `.las` output to a dataset from within Pro afterward
-if needed.
+Any format whose output mode converts to `.las` also needs the `pdal` command-line tool available
+where it runs -- see [Running an exported script](#running-an-exported-script) below, since on
+Windows that is not as simple as it sounds. **Download COPC file(s) only** never runs PDAL, so it
+needs nothing extra. LAS dataset creation/pyramids and breaklines are **not** included -- those are
+ArcGIS Pro/arcpy-only steps; add the `.las` output to a dataset from within Pro afterward if needed.
+
+### Running an exported script
+
+Each script's header comment also repeats the command to run it. In every case the destination
+folder and options are near the top of the file if you want to change them first.
+
+#### Getting `pdal` (only needed when converting to `.las`)
+
+`pdal` is **not** on the PATH of a normal Windows machine, even one with ArcGIS Pro installed. Pro
+bundles PDAL, but it only works inside Pro's own Python environment, so a script launched from
+File Explorer, a plain Command Prompt, or PowerShell ISE will download the tiles and then fail at
+the convert step with a "file not found" style error for `pdal`. (If only part of its folder is on the
+PATH you instead get Windows exit code `-1073741515`, a missing-DLL error.)
+
+- **On a machine with ArcGIS Pro:** open the Start menu → **ArcGIS** → **Python Command Prompt**
+  (the one that activates Pro's environment), `cd` to the folder holding the script, and run it from
+  there with the commands below. You can check with `pdal --version`.
+- **On a machine without Pro:** install PDAL yourself (for example
+  `conda install -c conda-forge pdal`) and run the script from that environment.
+
+Adding only Pro's `Library\bin` folder to PATH is *not* enough -- PDAL needs the rest of the
+environment that activation sets up.
+
+#### Per format
+
+| Format | How to run |
+|---|---|
+| **Executable (.exe)** | Double-click it. For a download-only export that is all you need. If it converts, launch it from the Python Command Prompt instead (type its path, or `cd` to its folder and type its name). It stays open with *Press Enter to exit...* when it finishes, so you can read the result. Windows SmartScreen may warn about it, since it isn't code-signed. |
+| **PowerShell (.ps1)** | Double-clicking a `.ps1` opens it in an editor rather than running it -- that's a Windows default, not a problem with the script. Run it from a prompt: `powershell -ExecutionPolicy Bypass -File "C:\path\to\kylidar_export_....ps1"`. The `-ExecutionPolicy Bypass` covers just that one run, and avoids the "running scripts is disabled on this system" error. Right-click → **Run with PowerShell** also usually works, but the window can close before you read the output. PowerShell ISE works too (open the file, press **F5**), but it isn't Pro's environment, so it can only do download-only exports. |
+| **Python (.py)** | `python "C:\path\to\kylidar_export_....py"` -- from the Python Command Prompt, `python` is Pro's own Python, which needs nothing installed beyond what Pro has. |
+| **Notebook (.ipynb)** | Open it in Jupyter/JupyterLab or VS Code and run the cells top to bottom. When converting, the notebook's kernel must be an environment that has `pdal` (Pro's Python environment has it). |
+| **Shell (.sh)** | `bash "/path/to/kylidar_export_....sh"` on macOS, Linux or WSL. Needs `curl`, plus `pdal` when converting. |
 
 ## Progress log
 

@@ -72,6 +72,21 @@ The breaklines are also stored in a `breaklines_<timestamp>.gdb` in the output f
 dataset references -- if the dataset shows no constraint after you moved or deleted the output
 folder, that geodatabase is what went missing.
 
+## Double-clicking an exported `.ps1` opens an editor instead of running it
+
+That's a Windows default: `.ps1` files are associated with an editor, not with running them. Run it
+from a prompt with `powershell -ExecutionPolicy Bypass -File "<path to the .ps1>"`, or use the
+**Executable (.exe)** export format, which is the one meant to be double-clicked. See
+[Running an exported script](clip-and-run.md#running-an-exported-script).
+
+## An exported script downloads the tiles but fails to convert them
+
+The convert step needs the `pdal` command-line tool, and on Windows it isn't on the PATH of a normal
+Command Prompt, PowerShell, or PowerShell ISE -- not even on a machine with ArcGIS Pro. Launch the
+script from Start menu → **ArcGIS** → **Python Command Prompt**, which activates Pro's environment
+(check with `pdal --version`), then run it again from there. Full details are under
+[Running an exported script](clip-and-run.md#running-an-exported-script).
+
 ## Run/Search Catalog/Export Script stays disabled
 
 These require an AOI (draw or select one first). If you just finished drawing/selecting an AOI and
