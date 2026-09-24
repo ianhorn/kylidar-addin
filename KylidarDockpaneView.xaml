@@ -21,6 +21,9 @@
             <Setter Property="Margin" Value="4,0,0,0"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="FontWeight" Value="Bold"/>
+            <!-- The explanation lives in each button's ToolTip property (shown on hover, wrapped by
+                 WrapToolTips in the code-behind); a click also opens it and keeps it open. -->
+            <EventSetter Event="Click" Handler="InfoButton_Click"/>
         </Style>
     </UserControl.Resources>
     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -126,12 +129,6 @@
                 <TextBox Text="{Binding ExistingDatasetPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0"/>
                 <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseExistingDatasetCommand}" Padding="8,3"/>
             </Grid>
-
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                <CheckBox Content="Build pyramids (not recommended)" IsChecked="{Binding BuildPyramids}" IsEnabled="{Binding CanBuildPyramids}" VerticalAlignment="Center"/>
-                <Button Content="i" Style="{StaticResource InfoButtonStyle}"
-                        ToolTip="Speeds up display of the dataset in the map, but can add significantly more time to processing."/>
-            </StackPanel>
 
             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                 <CheckBox Content="Add hydro-enforced breaklines" IsChecked="{Binding AddBreaklines}" IsEnabled="{Binding CanAddBreaklines}" VerticalAlignment="Center"/>

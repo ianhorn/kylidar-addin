@@ -3,7 +3,7 @@
  * preview, output mode (download raw COPC files only / convert to .las keeping the raw COPCs /
  * convert discarding them -- always as individual per-tile files, no merge option -- optionally
  * cropped to the drawn/selected AOI, see below), LAS dataset disposition (none/create/add-to-
- * existing + pyramids), run/cancel, an "Export Script" alternative to Run that writes a stand-alone
+ * existing), run/cancel, an "Export Script" alternative to Run that writes a stand-alone
  * download/convert kit instead of running here (see ExportScriptService), and the progress log.
  * The output/dataset choices are all made up front, before Run, rather than prompted for afterward
  * -- RunAsync executes the whole chosen pipeline in one pass.
@@ -325,7 +325,6 @@ namespace KylidarAddin
                 SetProperty(ref _selectedDatasetAction, value);
                 NotifyPropertyChanged(nameof(ShowNewDatasetPath));
                 NotifyPropertyChanged(nameof(ShowExistingDatasetPath));
-                NotifyPropertyChanged(nameof(CanBuildPyramids));
                 NotifyPropertyChanged(nameof(CanAddBreaklines));
                 NotifyPropertyChanged(nameof(IsDatasetActionNoneSelected));
                 NotifyPropertyChanged(nameof(IsDatasetActionCreateNewSelected));
@@ -335,7 +334,6 @@ namespace KylidarAddin
 
         public bool ShowNewDatasetPath => SelectedDatasetAction == DatasetAction.CreateNew;
         public bool ShowExistingDatasetPath => SelectedDatasetAction == DatasetAction.AddExisting;
-        public bool CanBuildPyramids => SelectedDatasetAction != DatasetAction.None;
 
         // Checkbox-styled stand-ins for a radio group -- see IsDownloadCopcOnlySelected etc. above
         // for why unchecking is a no-op rather than clearing the selection.
@@ -370,9 +368,6 @@ namespace KylidarAddin
             get => _existingDatasetPath;
             set => SetProperty(ref _existingDatasetPath, value);
         }
-
-        private bool _buildPyramids;
-        public bool BuildPyramids { get => _buildPyramids; set => SetProperty(ref _buildPyramids, value); }
 
         private bool _addBreaklines;
         /// <summary>Whether to add the hydro-enforced breaklines as a surface constraint. Only takes
@@ -795,8 +790,8 @@ namespace KylidarAddin
             elapsed.TotalMinutes >= 1 ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s" : $"{elapsed.TotalSeconds:F1}s";
 
         /// <summary>
-        /// Post-clip dataset step, now chosen up front (SelectedDatasetAction/BuildPyramids)
-        /// instead of prompted for after the clip finishes.
+        /// Post-clip dataset step, now chosen up front (SelectedDatasetAction) instead of
+        /// prompted for after the clip finishes.
         /// </summary>
         private async Task AddToLasDatasetAsync(IReadOnlyList<string> lasPaths, IProgress<string> progress, string surfaceConstraint)
         {
@@ -823,16 +818,6 @@ namespace KylidarAddin
                 return;
             }
             LogLines.Add($"LAS dataset {(SelectedDatasetAction == DatasetAction.CreateNew ? "created" : "updated")}{(surfaceConstraint != null ? " with breakline surface constraint" : "")} ({FormatDuration(datasetStopwatch.Elapsed)}).");
-
-            if (BuildPyramids)
-            {
-                LogLines.Add("Building LAS dataset pyramids...");
-                var pyramidStopwatch = Stopwatch.StartNew();
-                if (!await LasDatasetService.BuildPyramidsAsync(datasetPath, progress))
-                    LogLines.Add("Failed to build LAS dataset pyramids.");
-                else
-                    LogLines.Add($"Pyramids built ({FormatDuration(pyramidStopwatch.Elapsed)}).");
-            }
 
             await LasDatasetService.AddToMapAsync(datasetPath);
         }

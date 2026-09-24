@@ -5,7 +5,7 @@
  * SearchDockpaneViewModel.BuildPython/PowerShell/ShellDownloadScript (same add-in family, same
  * "portable download kit" idea for its own raster/point-cloud downloads), with a PDAL convert (and
  * optional crop) step added since that add-in has no such step to export. LAS dataset
- * creation/pyramids are NOT included -- those are ArcGIS Pro/arcpy-only operations with no portable
+ * creation is NOT included -- those are ArcGIS Pro/arcpy-only operations with no portable
  * equivalent, so the exported script just leaves the .las files on disk.
  *
  * The convert step assumes the target machine has the "pdal" CLI on PATH -- reasonable for anyone
@@ -134,8 +134,8 @@ namespace KylidarAddin.Services
                 "Edit DEST_FOLDER below if needed, then run:",
                 "    python \"<this file>\"",
                 "",
-                "CONVERT needs the \"pdal\" CLI on PATH. LAS dataset creation/pyramids (an ArcGIS Pro",
-                "feature) are not included -- add the .las output to a dataset from within Pro if needed.",
+                "CONVERT needs the \"pdal\" CLI on PATH. LAS dataset creation (an ArcGIS Pro",
+                "feature) is not included -- add the .las output to a dataset from within Pro if needed.",
                 "\"\"\"",
                 "import concurrent.futures",
                 "import json",
@@ -239,8 +239,8 @@ namespace KylidarAddin.Services
                 $"Generated {DateTime.Now:yyyy-MM-dd HH:mm} -- {tileUrls.Count} tile(s).",
                 "",
                 "Run the cells below in order. `CONVERT` needs the `pdal` CLI on PATH (e.g. a conda",
-                "environment with PDAL installed). LAS dataset creation/pyramids (an ArcGIS Pro feature)",
-                "are not included -- add the `.las` output to a dataset from within Pro if needed."
+                "environment with PDAL installed). LAS dataset creation (an ArcGIS Pro feature)",
+                "is not included -- add the `.las` output to a dataset from within Pro if needed."
             };
 
             var configLines = new List<string>
@@ -383,8 +383,8 @@ namespace KylidarAddin.Services
                 "    Edit $DestFolder below if needed, then run:",
                 "        powershell -ExecutionPolicy Bypass -File \"<this file>\"",
                 "",
-                "    $Convert needs the \"pdal\" CLI on PATH. LAS dataset creation/pyramids (an ArcGIS",
-                "    Pro feature) are not included -- add the .las output to a dataset from within Pro",
+                "    $Convert needs the \"pdal\" CLI on PATH. LAS dataset creation (an ArcGIS",
+                "    Pro feature) is not included -- add the .las output to a dataset from within Pro",
                 "    if needed.",
                 "#>",
                 "",
@@ -507,8 +507,8 @@ namespace KylidarAddin.Services
                 "# Kylidar stand-alone download/convert script",
                 $"# Generated {DateTime.Now:yyyy-MM-dd HH:mm} -- {tileUrls.Count} tile(s).",
                 "# Edit DEST_FOLDER below if needed, then run: bash \"<this file>\"",
-                "# CONVERT needs the \"pdal\" CLI on PATH. LAS dataset creation/pyramids (an ArcGIS Pro",
-                "# feature) are not included -- add the .las output to a dataset from within Pro if needed.",
+                "# CONVERT needs the \"pdal\" CLI on PATH. LAS dataset creation (an ArcGIS Pro",
+                "# feature) is not included -- add the .las output to a dataset from within Pro if needed.",
                 "set -u",
                 "",
                 $"DEST_FOLDER=\"{EscapeSh(destFolder)}\"",

@@ -77,9 +77,8 @@ the old per-run prompt, this choice is made up front:
 - **Add to existing dataset** prompts you to pick an existing `.lasd` and appends the output file(s)
   to it, then adds it to the active map.
 
-**Build pyramids (not recommended)** is available once either option is selected. Building pyramids
-speeds up display of the dataset in the map, but can add significantly more time to processing --
-hence the label and the **i** button explaining the tradeoff.
+A new dataset is created **without computing statistics**, which skips an extra pass over every
+point and so is faster; they can still be computed afterward if you need them.
 
 ### Hydro-enforced breaklines
 
@@ -133,7 +132,7 @@ running on another machine, or scheduling for later. Choose a format and a desti
 Any format whose output mode converts to `.las` also needs the `pdal` command-line tool available
 where it runs -- see [Running an exported script](#running-an-exported-script) below, since on
 Windows that is not as simple as it sounds. **Download COPC file(s) only** never runs PDAL, so it
-needs nothing extra. LAS dataset creation/pyramids and breaklines are **not** included -- those are
+needs nothing extra. LAS dataset creation and breaklines are **not** included -- those are
 ArcGIS Pro/arcpy-only steps; add the `.las` output to a dataset from within Pro afterward if needed.
 
 ### Running an exported script

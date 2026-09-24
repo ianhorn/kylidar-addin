@@ -50,7 +50,7 @@
             Write out a stand-alone download/convert kit for the current AOI's matching tiles that
             runs without ArcGIS Pro -- for very large batches, running on another machine, or
             scheduling for later. The convert step needs the "pdal" CLI on the machine that runs
-            it; LAS dataset creation/pyramids are a Pro-only step and aren't included.
+            it; LAS dataset creation is a Pro-only step and is not included.
         </TextBlock>
 
         <TextBlock Grid.Row="1" Text="Script type" FontWeight="SemiBold" Foreground="Black" Margin="0,0,0,4"/>
