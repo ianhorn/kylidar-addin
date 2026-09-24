@@ -12,6 +12,7 @@
  */
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -135,17 +136,36 @@ namespace KylidarAddin
             Mouse.OverrideCursor = Cursors.Wait;
             try
             {
-                var (ok, unioned, count) = await QueuedTask.Run(() =>
+                // Step 1 -- select only, as its own short main-CIM-thread job. The geometry work in
+                // step 2 (fetch, reproject, union) can take seconds for a big feature (a county
+                // boundary, a long river line) and used to run in this same job right after
+                // SelectFeatures, so Pro was still trying to paint the selection highlight while that
+                // work held the thread -- the highlight then trickled in a piece at a time. Returning
+                // here first lets Pro service its own queued work (the highlight redraw) before step 2
+                // is queued.
+                var selected = await QueuedTask.Run(() =>
                 {
                     var mapView = MapView.Active;
-                    if (mapView == null) return (false, (Geometry)null, 0);
+                    if (mapView == null) return null;
 
                     var selection = mapView.SelectFeatures(geometry, SelectionCombinationMethod.New);
-                    if (selection.Count == 0) return (false, (Geometry)null, 0);
+                    return selection.Count == 0 ? null : selection.ToDictionary();
+                });
 
-                    var mapSr = mapView.Map.SpatialReference;
+                if (selected == null)
+                {
+                    MessageBox.Show("No feature found there. Click directly on a feature, or drag a box over one.",
+                        "Kylidar", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return false;
+                }
+
+                // Step 2 -- read the selected features' shapes and union them into the AOI.
+                var geometryTimer = Stopwatch.StartNew();
+                var (unioned, count) = await QueuedTask.Run(() =>
+                {
+                    var mapSr = MapView.Active?.Map.SpatialReference;
                     var shapes = new List<Geometry>();
-                    foreach (var kvp in selection.ToDictionary())
+                    foreach (var kvp in selected)
                     {
                         if (kvp.Key is not FeatureLayer featureLayer) continue;
 
@@ -161,7 +181,7 @@ namespace KylidarAddin
                         }
                     }
 
-                    if (shapes.Count == 0) return (false, (Geometry)null, 0);
+                    if (shapes.Count == 0) return ((Geometry)null, 0);
 
                     // Union requires matching geometry dimension (point/multipoint vs polyline vs
                     // polygon/envelope) -- batch-union within each dimension group (fast, one native
@@ -171,17 +191,26 @@ namespace KylidarAddin
                         .Select(g => g.Count() == 1 ? g.First() : GeometryEngine.Instance.Union(g))
                         .Aggregate((a, b) => GeometryEngine.Instance.Union(a, b));
 
-                    return (true, result, shapes.Count);
+                    return (result, shapes.Count);
                 });
 
-                if (!ok)
+                if (unioned == null)
                 {
                     MessageBox.Show("No feature found there. Click directly on a feature, or drag a box over one.",
                         "Kylidar", MessageBoxButton.OK, MessageBoxImage.Information);
                     return false;
                 }
 
-                AoiState.Set(unioned, $"AOI from {count} selected feature(s)");
+                // When step 2 was slow, say so (and how big the geometry was) right in the AOI status
+                // line, so a slow selection can be told apart from a slow highlight redraw.
+                var description = $"AOI from {count} selected feature(s)";
+                if (geometryTimer.Elapsed.TotalSeconds >= 1.5)
+                {
+                    var vertices = (unioned as Multipart)?.PointCount;
+                    description += $" (reading the geometry took {geometryTimer.Elapsed.TotalSeconds:F1}s" +
+                                   (vertices.HasValue ? $", {vertices.Value:N0} vertices)" : ")");
+                }
+                AoiState.Set(unioned, description);
                 return true;
             }
             catch (Exception ex)
