@@ -99,7 +99,8 @@ is triangulated into a surface.
   different from a naive conversion, and the one that lines up with the LiDAR). Z is already in
   feet.
 - **Where they go.** The clipped lines are written to a `breaklines_<timestamp>.gdb` (feature class
-  `Breaklines`, with `BL_TYPE` and `PHASE` fields) in the output folder. The dataset references that
+  `Breaklines`, with `BL_TYPE` and `PHASE` fields) in the output folder, and added to the active map
+  as a **Hydro-enforced breaklines** layer above the LAS dataset. The dataset references that
   geodatabase, so keep it alongside the dataset.
 - **Best effort.** If the breakline download fails, or none fall inside the AOI, the log says why and
   the dataset is still built without the constraint.
@@ -118,7 +119,12 @@ before it takes effect).
 
 Click **Export Script...** to write a stand-alone download/convert kit for the current AOI's
 matching tiles, using the same phase and output-mode settings as Run -- for very large batches,
-running on another machine, or scheduling for later. Choose a format and a destination folder:
+running on another machine, or scheduling for later. A dialog asks for a format and a destination
+folder; the line under the format list describes whichever one is selected.
+
+![The Export Script dialog: a Script type list with Python script, Jupyter notebook, PowerShell script, Shell script and Executable, a note under it saying Needs Python 3 on the machine that runs it, a Downloads will be saved to folder box with Browse, and Cancel and Export buttons](images/export-script-dialog.png){ width="480" loading=lazy }
+
+The formats:
 
 - **Python script (.py)** -- needs Python 3 on the machine that runs it.
 - **Jupyter notebook (.ipynb)** -- runs in Jupyter/JupyterLab, VS Code's notebook viewer, or Google
@@ -169,8 +175,18 @@ environment that activation sets up.
 
 ## Progress log
 
-The log below Run/Cancel fills in live, e.g. (for **Download, Convert to LAS, Discard COPC** with
-clipping off):
+Below Run/Cancel, the **Progress** log fills in live as each step happens, and while a run is going a
+progress bar appears under it:
+
+![The Progress log mid-run, listing download progress for a tile and a Converting and clipping line, above a half-filled progress bar reading Converting: 0 / 1 (50%) with an ETA](images/progress-log.png){ width="555" loading=lazy }
+
+The bar shows the current phase (**Downloading** or **Converting**), how many tiles are done, the
+overall percentage, and an ETA once there's enough data to estimate one. In the two conversion modes
+downloading fills the first half of the bar and converting the second, so it sits at 50% when the
+downloads finish and conversion begins, as above.
+
+An abridged log (without the per-tile download lines) looks like this, e.g. for **Download, Convert to
+LAS, Discard COPC** with clipping off:
 
 ```
 Searching STAC catalog for LiDAR coverage...

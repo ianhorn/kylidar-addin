@@ -9,6 +9,11 @@ selected feature(s)").
 Click one of the three **Draw** buttons to activate an ArcGIS Pro sketch tool on the active map --
 draw your shape and it becomes the AOI. Requires an open map view.
 
+![A polygon AOI drawn on a hillshade map, filled cyan and labeled Polygon AOI, with the Kylidar pane docked alongside reading AOI ready: Polygon AOI](images/aoi-on-map.jpg){ width="800" loading=lazy }
+
+Once the shape is finished, the pane's status line confirms it ("AOI ready: Polygon AOI" above), and
+the shape stays on the map -- the cyan, labeled polygon is its [Map Notes](#map-notes) record.
+
 A point or line AOI has no area on its own. This is fine for searching (the STAC search just needs
 an intersecting geometry) and for the two output modes with clipping off. If you turn on
 [Clip to area of interest](clip-and-run.md#clipping-to-the-area-of-interest), though, a point or

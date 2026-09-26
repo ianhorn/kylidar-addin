@@ -5,7 +5,19 @@
 Click the **Kylidar** tab, then the **Kylidar** button. This opens a dockable pane (docked
 alongside the Contents pane by default) that stays open as you work.
 
+![The Kylidar pane as it first opens: Area of Interest tools, LiDAR phase checkboxes, Search Catalog, the Output options, Add to LAS Dataset, and the Run, Cancel and Export Script buttons above a Progress log](images/pane-overview.png){ width="615" loading=lazy }
+
+The pane reads top to bottom in the order you'd use it: set the area of interest, pick the phase(s),
+choose the output, optionally build a LAS dataset, then **Run** (or **Export Script...**) and watch
+the **Progress** log.
+
 ## A first run, end to end
+
+The pane below is set up for a typical run: a polygon AOI, Phase 3, one tile found by **Search
+Catalog**, clipping to the AOI with a 100 ft buffer, and a new LAS dataset with hydro-enforced
+breaklines. The steps that follow explain each part.
+
+![The Kylidar pane configured for a run: AOI ready as a Polygon AOI, Phase 3 checked, 1 LiDAR tile found, Download Convert to LAS Discard COPC selected, Clip to area of interest checked with a 100 foot buffer, Create new dataset selected, and Add hydro-enforced breaklines checked](images/pane-configured.png){ width="420" loading=lazy }
 
 1. **Set an area of interest.** Under **Area of Interest**, click **Draw Point**, **Draw Line**,
    **Draw Polygon**, or **Select Feature** and define your AOI on the active map. The status line
@@ -26,6 +38,9 @@ alongside the Contents pane by default) that stays open as you work.
    **Browse...** to pick somewhere else.
 7. **(Optional) Add to LAS Dataset.** Choose **Create new dataset** or **Add to existing dataset**
    to fold the output `.las` file(s) into a `.lasd` and add it to the map once the run finishes.
+   With a dataset chosen you can also check **Add hydro-enforced breaklines** to add the Phase 2/3
+   breaklines inside the AOI as a surface constraint -- see
+   [Hydro-enforced breaklines](clip-and-run.md#hydro-enforced-breaklines).
 8. **Click Run.** The pane's progress log fills in live as tiles are found, downloaded, and
    converted. **Cancel** stops an in-progress run.
 
