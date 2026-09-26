@@ -70,5 +70,24 @@ namespace KylidarAddin.Services
                 catch { return false; }
             });
         }
+
+        /// <summary>Add a geodatabase feature class (here, the clipped breaklines) to the active map
+        /// under the given layer name -- named explicitly because every run writes a feature class
+        /// called "Breaklines", which would otherwise stack up as identically named layers.</summary>
+        public static Task<bool> AddFeatureClassToMapAsync(string featureClassPath, string layerName)
+        {
+            return QueuedTask.Run(() =>
+            {
+                var mv = MapView.Active;
+                if (mv == null) return false;
+                try
+                {
+                    var parameters = new FeatureLayerCreationParams(new Uri(featureClassPath)) { Name = layerName };
+                    LayerFactory.Instance.CreateLayer<FeatureLayer>(parameters, mv.Map);
+                    return true;
+                }
+                catch { return false; }
+            });
+        }
     }
 }

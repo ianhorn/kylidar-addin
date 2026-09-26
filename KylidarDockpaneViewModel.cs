@@ -676,6 +676,7 @@ namespace KylidarAddin
 
             ClipResult result = null;
             string surfaceConstraint = null;
+            string breaklineFeatureClass = null;
             try
             {
                 var aoi = AoiState.Current;
@@ -707,7 +708,9 @@ namespace KylidarAddin
                     if (Phase1) phases.Add(1);
                     if (Phase2) phases.Add(2);
                     if (Phase3) phases.Add(3);
-                    surfaceConstraint = await BuildBreaklineConstraintAsync(breaklineRegion, phases, OutputFolder, progress, _cts.Token);
+                    breaklineFeatureClass = await BuildBreaklineFeatureClassAsync(breaklineRegion, phases, OutputFolder, progress, _cts.Token);
+                    if (breaklineFeatureClass != null)
+                        surfaceConstraint = BreaklineService.ToConstraintArgument(breaklineFeatureClass);
                 }
             }
             catch (OperationCanceledException)
@@ -744,15 +747,25 @@ namespace KylidarAddin
 
             await AddToLasDatasetAsync(result.OutputPaths, progress, surfaceConstraint);
 
+            // After the dataset so the lines draw on top of the point cloud. Added even if the dataset
+            // step failed: the feature class exists on disk either way and is worth seeing.
+            if (breaklineFeatureClass != null)
+            {
+                LogLines.Add(await LasDatasetService.AddFeatureClassToMapAsync(breaklineFeatureClass, "Hydro-enforced breaklines")
+                    ? "Added the hydro-enforced breaklines to the map."
+                    : "Couldn't add the breaklines to the map (open a map view, or add the Breaklines feature class from the output folder manually).");
+            }
+
             LogLines.Add($"Total time: {FormatDuration(_runStopwatch.Elapsed)}");
         }
 
         /// <summary>
-        /// Download + clip + write the breaklines, returning the surface-constraint argument for the
-        /// LAS dataset tools, or null (after logging why) when there's nothing to add. Best-effort:
-        /// anything but cancellation is logged and swallowed so the point data still gets its dataset.
+        /// Download + clip + write the breaklines, returning the path of the feature class written
+        /// (it feeds both the LAS dataset's surface constraint and the map layer), or null (after
+        /// logging why) when there's nothing to add. Best-effort: anything but cancellation is logged
+        /// and swallowed so the point data still gets its dataset.
         /// </summary>
-        private async Task<string> BuildBreaklineConstraintAsync(
+        private async Task<string> BuildBreaklineFeatureClassAsync(
             BreaklineRegion region, IReadOnlyCollection<int> phases, string outputFolder, IProgress<string> progress, CancellationToken ct)
         {
             try
@@ -773,7 +786,7 @@ namespace KylidarAddin
                     return null;
                 }
                 progress.Report($"Wrote {written.FeatureCount} clipped breakline(s) to {written.FeatureClassPath}.");
-                return BreaklineService.ToConstraintArgument(written.FeatureClassPath);
+                return written.FeatureClassPath;
             }
             catch (OperationCanceledException)
             {
