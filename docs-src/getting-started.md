@@ -5,6 +5,10 @@
 Click the **Kylidar** tab, then the **Kylidar** button. This opens a dockable pane (docked
 alongside the Contents pane by default) that stays open as you work.
 
+**Feedback** and **Help**, at the top of the pane, are available any time: **Feedback** opens a
+dialog to report a bug or request a feature -- either on GitHub, or straight to the developer with
+no GitHub account needed -- and **Help** opens this documentation site in your browser.
+
 ![The Kylidar pane as it first opens: Area of Interest tools, LiDAR phase checkboxes, Search Catalog, the Output options, Add to LAS Dataset, and the Run, Cancel and Export Script buttons above a Progress log](images/pane-overview.png){ width="615" loading=lazy }
 
 The pane reads top to bottom in the order you'd use it: set the area of interest, pick the phase(s),
@@ -20,10 +24,11 @@ breaklines. The steps that follow explain each part.
 ![The Kylidar pane configured for a run: AOI ready as a Polygon AOI, Phase 3 checked, 1 LiDAR tile found, Download Convert to LAS Discard COPC selected, Clip to area of interest checked with a 100 foot buffer, Create new dataset selected, and Add hydro-enforced breaklines checked](images/pane-configured.png){ width="420" loading=lazy }
 
 1. **Set an area of interest.** Under **Area of Interest**, click **Draw Point**, **Draw Line**,
-   **Draw Polygon**, or **Select Feature** and define your AOI on the active map. The status line
-   below the buttons updates to confirm what was captured (e.g. "AOI ready: Polygon AOI"), and a
-   persistent Map Notes feature is added to the map. See [Area of Interest](area-of-interest.md)
-   for details, or **Clear Selection** to start over.
+   **Draw Polygon**, or **Select Feature** and define your AOI on the active map, or **Browse for
+   File...** to use a shapefile or geodatabase feature class from disk without first adding it as a
+   layer. The status line below the buttons updates to confirm what was captured (e.g. "AOI ready:
+   Polygon AOI"), and a persistent Map Notes feature is added to the map (drawn AOIs only). See
+   [Area of Interest](area-of-interest.md) for details, or **Clear Selection** to start over.
 2. **Choose LiDAR phase(s).** Check one or more phases. Phase 1 is disabled here -- see
    [LiDAR phases](clip-and-run.md#lidar-phases).
 3. **(Optional) Search Catalog.** Click **Search Catalog** to preview how many tiles match your
@@ -34,14 +39,17 @@ breaklines. The steps that follow explain each part.
 5. **(Optional) Clip to area of interest.** Check this to crop each tile to the AOI during
    conversion; a **Buffer (feet)** field appears when checked. See
    [Clipping](clip-and-run.md#clipping-to-the-area-of-interest).
-6. **Set the output folder.** Defaults to a timestamped folder in your temp directory; use
-   **Browse...** to pick somewhere else.
-7. **(Optional) Add to LAS Dataset.** Choose **Create new dataset** or **Add to existing dataset**
-   to fold the output `.las` file(s) into a `.lasd` and add it to the map once the run finishes.
-   With a dataset chosen you can also check **Add hydro-enforced breaklines** to add the Phase 2/3
-   breaklines inside the AOI as a surface constraint -- see
+6. **(Optional) Compress to zLAS.** Check this to compress the converted `.las` output to Esri's
+   own zLAS format -- needs the 3D Analyst extension. See
+   [Compress to zLAS](clip-and-run.md#compress-to-zlas).
+7. **Set the output folder.** Defaults to a timestamped folder inside the current project's own
+   folder; use **Browse...** to pick somewhere else.
+8. **(Optional) Add to LAS Dataset.** Choose **Create new dataset** or **Add to existing dataset**
+   to fold the output `.las` (or `.zlas`) file(s) into a `.lasd` and add it to the map once the run
+   finishes. With a dataset chosen you can also check **Add hydro-enforced breaklines** to add the
+   Phase 2/3 breaklines inside the AOI as a surface constraint -- see
    [Hydro-enforced breaklines](clip-and-run.md#hydro-enforced-breaklines).
-8. **Click Run.** The pane's progress log fills in live as tiles are found, downloaded, and
+9. **Click Run.** The pane's progress log fills in live as tiles are found, downloaded, and
    converted. **Cancel** stops an in-progress run.
 
 !!! tip "Re-running with different settings"

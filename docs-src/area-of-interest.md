@@ -34,6 +34,18 @@ unchanged -- click directly on a feature, or drag a box that overlaps one.
 A selected polygon with holes, gaps, or islands can make PDAL's crop step error if clipping is
 enabled -- see the warning that appears under **Clip to area of interest** in that case.
 
+## Browse for File
+
+Click **Browse for File...** to pick a shapefile or a file geodatabase feature class from disk and
+use its features (unioned, same as **Select Feature**) as the AOI. Opens Pro's own Browse dialog
+(the same one used throughout Pro), filtered to feature classes -- it can browse into a `.gdb`, not
+just loose files.
+
+Unlike **Select Feature**, the dataset doesn't need to already be a layer on the active map, so this
+is the quicker option when your AOI lives in a file you haven't opened in Pro yet. A feature class
+with no features, or a file type this can't open (anything but a shapefile or a geodatabase feature
+class), shows a message box rather than silently doing nothing.
+
 ## Clear Selection
 
 Clears the current AOI and the active map's feature selection. **Search Catalog**, **Run**, and

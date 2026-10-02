@@ -35,6 +35,21 @@ Pick exactly one (they behave like a radio group, drawn as checkboxes):
 Each has an **i** button with this same tradeoff text. Every tile becomes its own `.las` file --
 there's no "merge everything into one file" step.
 
+### Compress to zLAS
+
+**Compress to zLAS (.zlas)** additionally compresses each converted tile to Esri's own zLAS format,
+via the **Convert LAS** geoprocessing tool. Only applies to the two convert modes above -- it has no
+effect on **Download COPC file(s) only**, since there's no `.las` yet to compress.
+
+- **Needs the 3D Analyst extension.** Same requirement as the LAS dataset tools this add-in already
+  uses elsewhere. If it's not licensed, the run fails with whatever error Convert LAS reports.
+- **Replaces the `.las`, it doesn't add to it.** Each tile's uncompressed `.las` is deleted once its
+  `.zlas` sibling exists, so the output folder (and `Add to LAS Dataset`, which accepts `.zlas`
+  directly) ends up with `.zlas` files instead of `.las`.
+- **Not in Export Script.** Export Script produces a kit that runs without ArcGIS Pro, and zLAS
+  compression is an arcpy/3D Analyst-only step with no portable equivalent -- exported kits always
+  produce plain `.las`.
+
 ## Clipping to the area of interest
 
 **Clip to area of interest** is off by default -- when off, every tile is converted (or kept) in
@@ -63,9 +78,12 @@ The buffer (when set) widens *both* the STAC search area and the crop area -- se
 
 ## Output folder
 
-Defaults to a timestamped folder under your temp directory
-(`kylidar_clip_<yyyyMMdd_HHmmss>`). Use **Browse...** to choose a different location before
-running. Its internal layout depends on the chosen output mode (see the table above).
+Defaults to a timestamped folder (`kylidar_clip_<yyyyMMdd_HHmmss>`) inside the current project's own
+folder -- the one holding the open `.aprx` -- rather than a Windows temp directory, so the output
+isn't at risk of being cleaned up along with anything ArcGIS Pro considers temporary. Falls back to
+the Windows temp directory if no project is open. Use **Browse...** to choose a different location
+before running. Its internal layout depends on the chosen output mode (see the table above). The
+default `.lasd` path under **Add to LAS dataset** below follows the same rule.
 
 ## Add to LAS dataset
 

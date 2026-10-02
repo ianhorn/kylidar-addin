@@ -87,6 +87,14 @@ script from Start menu → **ArcGIS** → **Python Command Prompt**, which activ
 (check with `pdal --version`), then run it again from there. Full details are under
 [Running an exported script](clip-and-run.md#running-an-exported-script).
 
+## "Compress to zLAS" fails with a Convert LAS error
+
+This needs the **3D Analyst** extension -- the same one the LAS dataset tools already use elsewhere
+in this add-in. If it isn't licensed on your machine, the run fails with whatever error Convert LAS
+reports; check **Project → Licensing** (or your organization's ArcGIS license manager) for 3D
+Analyst. The tiles themselves still convert to `.las` before this step runs, so nothing earlier in
+the run is lost -- only the compression step fails.
+
 ## Run/Search Catalog/Export Script stays disabled
 
 These require an AOI (draw or select one first). If you just finished drawing/selecting an AOI and

@@ -10,10 +10,11 @@ by a [STAC API](https://github.com/radiantearth/stac-api-spec) and [PDAL](https:
 
 ## Features
 
-- **Area of interest** tools: draw a point, line, or polygon on the map, or select existing
-  features and use their combined geometry. Every draw/select action also saves a persistent,
-  editable [Map Notes](area-of-interest.md#map-notes) feature, so you have a record of what you
-  drew and can reuse or edit it later.
+- **Area of interest** tools: draw a point, line, or polygon on the map, select existing features,
+  or browse for a shapefile/geodatabase feature class on disk, and use its (combined) geometry.
+  Every draw/select action also saves a persistent, editable
+  [Map Notes](area-of-interest.md#map-notes) feature, so you have a record of what you drew and can
+  reuse or edit it later.
 - **Search Catalog** preview: see how many tiles match your AOI and phase selection before running
   anything.
 - **Three output modes**: download the raw COPC/LAZ tiles as-is, convert to `.las` while keeping
@@ -21,6 +22,8 @@ by a [STAC API](https://github.com/radiantearth/stac-api-spec) and [PDAL](https:
   (there's no merge-into-one-file step).
 - **Optional clip to area of interest**: crop each tile to the AOI (plus an optional buffer) during
   conversion, instead of always keeping every tile in full.
+- **Optional compression to zLAS**: compress converted `.las` output to Esri's own zLAS format via
+  the Convert LAS geoprocessing tool (needs the 3D Analyst extension).
 - **Concurrent, adaptive processing**: tiles download and convert in parallel, throttled by CPU
   count and live memory pressure so a large run doesn't starve the rest of the system.
 - **Export Script**: write a stand-alone Python, Jupyter notebook, PowerShell, or shell
@@ -32,6 +35,8 @@ by a [STAC API](https://github.com/radiantearth/stac-api-spec) and [PDAL](https:
   (created without computing statistics, for speed), and add it to the map.
 - **Hydro-enforced breaklines**: optionally download the Phase 2/3 breaklines inside the AOI, clip
   and reproject them to EPSG:3089, and add them to the LAS dataset as a surface constraint.
+- **Feedback and Help**, always available at the top of the pane: report a bug or request a feature
+  (on GitHub, or directly, no account needed), or jump straight to this documentation site.
 
 ## Where to start
 
