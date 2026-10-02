@@ -13,12 +13,16 @@ ships it.
 
 ## Download pre-built add-in
 
-Prefer not to build from source? Grab the compiled `.esriAddinX` matching your installed ArcGIS Pro
-version from the repo's [`AddInX-Files/`](https://github.com/ianhorn/kylidar-addin/tree/main/AddInX-Files)
-folder:
+[![Downloads](https://img.shields.io/github/downloads/ianhorn/kylidar-addin/total.svg)](https://github.com/ianhorn/kylidar-addin/releases)
 
-- **ArcGIS Pro 3.6.x** -- [KylidarAddin-3.6.x.esriAddinX](https://raw.githubusercontent.com/ianhorn/kylidar-addin/main/AddInX-Files/KylidarAddin-3.6.x.esriAddinX)
-- **ArcGIS Pro 3.7 or later** -- [KylidarAddin-3.7.x.esriAddinX](https://raw.githubusercontent.com/ianhorn/kylidar-addin/main/AddInX-Files/KylidarAddin-3.7.x.esriAddinX)
+Prefer not to build from source? Grab the compiled `.esriAddinX` matching your installed ArcGIS Pro
+version from the [latest release](https://github.com/ianhorn/kylidar-addin/releases/latest):
+
+- **ArcGIS Pro 3.6.x** -- [KylidarAddin-3.6.x.esriAddinX](https://github.com/ianhorn/kylidar-addin/releases/latest/download/KylidarAddin-3.6.x.esriAddinX)
+- **ArcGIS Pro 3.7 or later** -- [KylidarAddin-3.7.x.esriAddinX](https://github.com/ianhorn/kylidar-addin/releases/latest/download/KylidarAddin-3.7.x.esriAddinX)
+
+(The source is also always on `main` at [`AddInX-Files/`](https://github.com/ianhorn/kylidar-addin/tree/main/AddInX-Files)
+if you'd rather fetch the latest build directly, without going through a release.)
 
 Both are built from the same source, at the same commit -- the only difference is which .NET
 version they target, matching whichever .NET runtime that Pro release hosts (Pro 3.6.x hosts .NET
@@ -81,6 +85,15 @@ assembly's version ships in the built add-in):
 "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" KylidarAddin.csproj -t:Restore -p:Configuration=Release -p:TargetFramework=net10.0-windows
 "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" KylidarAddin.csproj -p:Configuration=Release -p:TargetFramework=net10.0-windows
 ```
+
+!!! note "Publishing a rebuilt download"
+    The two `.esriAddinX` files are committed to `AddInX-Files/` on every rebuild (so `main` always
+    has the latest build), but the **Download pre-built add-in** links above point at a
+    [GitHub release](https://github.com/ianhorn/kylidar-addin/releases) instead, since only release
+    assets get a tracked download count. After rebuilding, also publish a release with the two
+    files attached (`gh release create v<version> AddInX-Files/KylidarAddin-3.6.x.esriAddinX
+    AddInX-Files/KylidarAddin-3.7.x.esriAddinX`) so the `/releases/latest/download/...` links serve
+    the new build.
 
 ## Verifying the install
 

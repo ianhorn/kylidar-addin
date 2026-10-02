@@ -1,5 +1,7 @@
 # Kylidar Add-in
 
+[![Downloads](https://img.shields.io/github/downloads/ianhorn/kylidar-addin/total.svg)](https://github.com/ianhorn/kylidar-addin/releases)
+
 An ArcGIS Pro add-in built with the ArcGIS Pro SDK for .NET.
 
 ## Documentation
