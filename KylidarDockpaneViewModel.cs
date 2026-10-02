@@ -158,6 +158,35 @@ namespace KylidarAddin
         private static void ShowFeedbackDialog() =>
             new FeedbackDialog { Owner = System.Windows.Application.Current?.MainWindow }.ShowDialog();
 
+        /// <summary>Compares this build with the latest GitHub release -- see UpdateCheckService.</summary>
+        public ICommand CheckVersionCommand => new RelayCommand(async () => await CheckVersionAsync());
+
+        private static async Task CheckVersionAsync()
+        {
+            try
+            {
+                var r = await UpdateCheckService.CheckAsync();
+                if (!r.IsNewerAvailable)
+                {
+                    MessageBox.Show($"You're up to date: Kylidar {r.Current} is the latest release.",
+                        "Kylidar", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var open = MessageBox.Show(
+                    $"A newer version is available.\n\nInstalled: {r.Current}\nLatest: {r.Latest}\n\nOpen the release page to download it? " +
+                    "(Close ArcGIS Pro before installing the new .esriAddinX.)",
+                    "Kylidar", MessageBoxButton.YesNo, MessageBoxImage.Information);
+                if (open == MessageBoxResult.Yes)
+                    Process.Start(new ProcessStartInfo(r.ReleaseUrl) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Couldn't check for a newer version: {ex.Message}\n\nYou can check manually at {UpdateCheckService.ReleasesPage}",
+                    "Kylidar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
         /// <summary>Opens the docs site in the user's default browser -- same pattern as
         /// kyfromabove-stac-addin's Help button.</summary>
         public ICommand HelpCommand => new RelayCommand(OpenHelp);

@@ -10,6 +10,12 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <NoWarn>CA1416</NoWarn>
     <AssemblyName>KylidarAddin</AssemblyName>
+    <!--
+      The add-in's version, compared with the latest GitHub release's tag by the pane's "Check
+      version" button (see UpdateCheckService). Bump this to match the tag BEFORE building a release,
+      or the released build would report itself as out of date.
+    -->
+    <Version>1.0.0</Version>
     <RootNamespace>KylidarAddin</RootNamespace>
     <PackageType>Addin</PackageType>
     <!--

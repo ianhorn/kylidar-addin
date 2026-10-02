@@ -95,6 +95,11 @@ assembly's version ships in the built add-in):
     AddInX-Files/KylidarAddin-3.7.x.esriAddinX`) so the `/releases/latest/download/...` links serve
     the new build.
 
+    **Bump `<Version>` in `KylidarAddin.csproj` to match the tag first** (e.g. `1.1.0` for `v1.1.0`)
+    and rebuild: the pane's **Check version** button compares the installed build's version with
+    the latest release's tag, so a release built without the bump would report itself as out of
+    date.
+
 ## Verifying the install
 
 Open ArcGIS Pro and look for the **Kylidar** ribbon tab with a **Kylidar** button. Clicking it

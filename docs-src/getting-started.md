@@ -7,7 +7,9 @@ alongside the Contents pane by default) that stays open as you work.
 
 **Feedback** and **Help**, at the top of the pane, are available any time: **Feedback** opens a
 dialog to report a bug or request a feature -- either on GitHub, or straight to the developer with
-no GitHub account needed -- and **Help** opens this documentation site in your browser.
+no GitHub account needed -- and **Help** opens this documentation site in your browser. **Check
+version** compares your installed build with the [latest release](https://github.com/ianhorn/kylidar-addin/releases/latest)
+and, if there's a newer one, offers to open its download page (close ArcGIS Pro before installing it).
 
 ![The Kylidar pane as it first opens: Area of Interest tools, LiDAR phase checkboxes, Search Catalog, the Output options, Add to LAS Dataset, and the Run, Cancel and Export Script buttons above a Progress log](images/pane-overview.png){ width="615" loading=lazy }
 
