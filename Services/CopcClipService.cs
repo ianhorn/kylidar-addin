@@ -1,6 +1,8 @@
 /*
- * Given an AOI geometry (map CRS) and the LiDAR phase(s) to search, three output modes are
- * supported (see the dock pane's Output section -- fastest to most disk-hungry):
+ * Given an AOI geometry (map CRS) and the LiDAR phase(s)/collections to search -- across one or
+ * more STAC API sources, see SourceCollections and KylidarDockpaneViewModel's "Bring Your Own API"
+ * handling -- three output modes are supported (see the dock pane's Output section -- fastest to
+ * most disk-hungry):
  *   - DownloadTilesOnlyAsync: search the STAC catalog and download each matching tile's raw file
  *     (COPC or plain LAZ) as-is -- no PDAL involved at all. Fastest, least disk. Never clips.
  *   - ConvertToLasAsync(keepRawCopc: false): search, fully download each tile locally, convert
@@ -135,35 +137,47 @@ namespace KylidarAddin.Services
         /// reported back as (possibly) truncated.</summary>
         public const int DefaultSearchLimit = 200;
 
+        /// <summary>One API source plus which of its collections to search -- the built-in KyFromAbove
+        /// source always searches its known laz-phase1/2/3 collections; a "Bring Your Own" source
+        /// searches whichever of its discovered collections the user checked (see
+        /// KylidarDockpaneViewModel.BuildSourceCollections). Every public search entry point below
+        /// takes a list of these instead of a flat collection-ID list, so a run can combine tiles
+        /// from more than one STAC API in a single search/download/convert pass.</summary>
+        public readonly struct SourceCollections
+        {
+            public StacApiSource Source { get; init; }
+            public IReadOnlyCollection<string> Collections { get; init; }
+        }
+
         /// <summary>Preview-only STAC search: how many LiDAR tiles intersect this AOI/phase selection,
         /// without fetching or processing anything. Backs the dock pane's "Search Catalog" button.
-        /// hitLimit is true when the search returned exactly <paramref name="limit"/> items -- there
-        /// may be more coverage than what's reflected in the count.</summary>
+        /// hitLimit is true when any one source's search returned exactly <paramref name="limit"/>
+        /// items -- there may be more coverage than what's reflected in the count.</summary>
         public static async Task<(int count, bool hitLimit)> SearchTileCountAsync(
-            string geoJson, IReadOnlyCollection<string> collections, int limit = DefaultSearchLimit, CancellationToken ct = default)
+            string geoJson, IReadOnlyList<SourceCollections> sources, int limit = DefaultSearchLimit, CancellationToken ct = default)
         {
-            var result = await SearchTilesAsync(geoJson, collections, limit, null, ct).ConfigureAwait(false);
+            var result = await SearchTilesAsync(geoJson, sources, limit, null, ct).ConfigureAwait(false);
             return (result.Tiles.Count, result.HitLimit);
         }
 
         /// <summary>Matching tile hrefs, for the dock pane's "Export Script" feature -- like
         /// SearchTileCountAsync but hands back what's needed to build a portable download script.
-        /// hitLimit is true when the search returned exactly <paramref name="limit"/> items.</summary>
+        /// hitLimit is true when any one source's search returned exactly <paramref name="limit"/> items.</summary>
         public static async Task<(IReadOnlyList<string> urls, bool hitLimit)> SearchTileUrlsAsync(
-            string geoJson, IReadOnlyCollection<string> collections, int limit = DefaultSearchLimit, CancellationToken ct = default)
+            string geoJson, IReadOnlyList<SourceCollections> sources, int limit = DefaultSearchLimit, CancellationToken ct = default)
         {
-            var result = await SearchTilesAsync(geoJson, collections, limit, null, ct).ConfigureAwait(false);
+            var result = await SearchTilesAsync(geoJson, sources, limit, null, ct).ConfigureAwait(false);
             return (result.Tiles.Select(t => t.asset.Href).ToList(), result.HitLimit);
         }
 
         /// <summary>Download each matching tile's raw file (COPC or plain LAZ) as-is into
         /// outputFolder -- no PDAL involved, no format conversion or clipping.</summary>
         public static async Task<ClipResult> DownloadTilesOnlyAsync(
-            string geoJson, IReadOnlyCollection<string> collections, string outputFolder,
+            string geoJson, IReadOnlyList<SourceCollections> sources, string outputFolder,
             IProgress<string> progress, IProgress<RunProgress> runProgress = null,
             int searchLimit = DefaultSearchLimit, CancellationToken ct = default)
         {
-            var searchResult = await SearchTilesAsync(geoJson, collections, searchLimit, progress, ct).ConfigureAwait(false);
+            var searchResult = await SearchTilesAsync(geoJson, sources, searchLimit, progress, ct).ConfigureAwait(false);
             var tiles = searchResult.Tiles;
             if (tiles.Count == 0)
                 return new ClipResult { Success = false, Error = "No LiDAR coverage found for this AOI in the selected phase(s). Try a different phase or a new AOI." };
@@ -212,18 +226,45 @@ namespace KylidarAddin.Services
             public bool HitLimit { get; init; }
         }
 
+        /// <summary>Searches every source independently and merges their tiles -- one unreachable or
+        /// erroring "Bring Your Own" source is reported via progress and otherwise ignored, the same
+        /// way the dock pane's "Load Collections" step tolerates a bad source, rather than failing
+        /// the whole search. Fails only if every source errored and none produced a tile.</summary>
         private static async Task<TileSearchResult> SearchTilesAsync(
-            string geoJson, IReadOnlyCollection<string> collections, int limit, IProgress<string> progress, CancellationToken ct)
+            string geoJson, IReadOnlyList<SourceCollections> sources, int limit, IProgress<string> progress, CancellationToken ct)
         {
-            progress?.Report("Searching STAC catalog for LiDAR coverage...");
-            using var stac = new StacClient();
-            var results = await stac.SearchIntersectsAsync(geoJson, collections, limit: limit, ct: ct).ConfigureAwait(false);
+            progress?.Report(sources.Count > 1
+                ? $"Searching {sources.Count} STAC API(s) for LiDAR coverage..."
+                : "Searching STAC catalog for LiDAR coverage...");
 
             var tiles = new List<(StacItem item, StacAsset asset)>();
-            foreach (var item in results?.Features ?? Enumerable.Empty<StacItem>())
-                foreach (var asset in item.GetLidarAssets())
-                    tiles.Add((item, asset));
-            bool hitLimit = (results?.Features?.Count ?? 0) >= limit;
+            bool hitLimit = false;
+            var errors = new List<string>();
+            foreach (var sc in sources)
+            {
+                ct.ThrowIfCancellationRequested();
+                StacItemCollection results;
+                try
+                {
+                    results = await sc.Source.Client.SearchIntersectsAsync(geoJson, sc.Collections, limit: limit, ct: ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    errors.Add($"{sc.Source.Name}: {ex.Message}");
+                    continue;
+                }
+
+                foreach (var item in results?.Features ?? Enumerable.Empty<StacItem>())
+                    foreach (var asset in item.GetLidarAssets())
+                        tiles.Add((item, asset));
+                if ((results?.Features?.Count ?? 0) >= limit) hitLimit = true;
+            }
+
+            if (errors.Count > 0)
+                progress?.Report((tiles.Count > 0 ? "Some sources failed: " : "All sources failed: ") + string.Join("; ", errors));
+            if (tiles.Count == 0 && errors.Count == sources.Count && sources.Count > 0)
+                throw new InvalidOperationException(string.Join("; ", errors));
+
             return new TileSearchResult { Tiles = tiles, HitLimit = hitLimit };
         }
 
@@ -244,7 +285,7 @@ namespace KylidarAddin.Services
         /// pointing at .zlas files instead of .las ones.
         /// </param>
         public static async Task<ClipResult> ConvertToLasAsync(
-            string geoJson, IReadOnlyCollection<string> collections,
+            string geoJson, IReadOnlyList<SourceCollections> sources,
             bool keepRawCopc, string outputFolder, IReadOnlyList<string> cropWktParts, bool compressToZlas,
             IProgress<string> progress, IProgress<RunProgress> runProgress = null,
             int searchLimit = DefaultSearchLimit, CancellationToken ct = default)
@@ -252,7 +293,7 @@ namespace KylidarAddin.Services
             string tempDir = null;
             try
             {
-                var searchResult = await SearchTilesAsync(geoJson, collections, searchLimit, progress, ct).ConfigureAwait(false);
+                var searchResult = await SearchTilesAsync(geoJson, sources, searchLimit, progress, ct).ConfigureAwait(false);
                 var tiles = searchResult.Tiles;
                 if (tiles.Count == 0)
                     return new ClipResult { Success = false, Error = "No LiDAR coverage found for this AOI in the selected phase(s). Try a different phase or a new AOI." };

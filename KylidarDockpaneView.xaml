@@ -58,14 +58,53 @@
 
             <Separator Margin="0,0,0,12"/>
 
+            <TextBlock Text="STAC API" FontWeight="Bold" Margin="0,0,0,4"/>
+            <Button Content="Bring Your Own API..." Command="{Binding BringYourOwnApiCommand}" HorizontalAlignment="Left" Padding="6,2" Margin="0,0,0,2"
+                    ToolTip="Add another STAC API alongside the built-in KyFromAbove catalog, or replace it entirely. Experimental -- may not work as expected with all STAC APIs."/>
+            <ItemsControl ItemsSource="{Binding ApiSources}" Margin="0,2,0,2">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="#55000000" BorderThickness="1" Padding="4,1" Margin="0,0,4,2" Background="#11000000">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" FontSize="11"/>
+                                <Button Content="x" Width="16" Height="16" Padding="0" Margin="4,0,0,0" FontSize="9"
+                                        Command="{Binding Path=DataContext.RemoveApiSourceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"
+                                        Visibility="{Binding CanRemove, Converter={StaticResource BoolToVis}}"
+                                        ToolTip="Remove this API source"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="{Binding ApiSourceStatusText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                       Visibility="{Binding ApiSourceStatusText, Converter={StaticResource StringToVis}}"/>
+
+            <Separator Margin="0,0,0,12"/>
+
             <TextBlock Text="LiDAR phase(s):" Margin="0,0,0,2"/>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                 <CheckBox Content="Phase 1" IsChecked="{Binding Phase1}" IsEnabled="False" Margin="0,0,10,0"
                           ToolTip="Phase 1 is in regular LAZ format and should be downloaded using the kyfromabove-stac add-in tool."/>
-                <CheckBox Content="Phase 2" IsChecked="{Binding Phase2}" Margin="0,0,10,0"/>
-                <CheckBox Content="Phase 3" IsChecked="{Binding Phase3}" Margin="0,0,14,0"/>
+                <CheckBox Content="Phase 2" IsChecked="{Binding Phase2}" IsEnabled="{Binding HasKyFromAboveSource}" Margin="0,0,10,0"
+                          ToolTip="Only applies while the built-in KyFromAbove catalog is one of the active sources."/>
+                <CheckBox Content="Phase 3" IsChecked="{Binding Phase3}" IsEnabled="{Binding HasKyFromAboveSource}" Margin="0,0,14,0"
+                          ToolTip="Only applies while the built-in KyFromAbove catalog is one of the active sources."/>
                 <Button Content="Search Catalog" Command="{Binding SearchCatalogCommand}" Padding="10,3"/>
             </StackPanel>
+            <ItemsControl ItemsSource="{Binding DynamicCollections}" Margin="0,0,0,4"
+                          Visibility="{Binding HasDynamicCollections, Converter={StaticResource BoolToVis}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <CheckBox Content="{Binding DisplayLabel}" IsChecked="{Binding IsChecked}" Margin="0,0,0,2"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
             <TextBlock Text="{Binding CatalogSearchStatusText}" TextWrapping="Wrap" Margin="0,0,0,4"
                        Visibility="{Binding CatalogSearchStatusText, Converter={StaticResource StringToVis}}"/>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,10" Visibility="{Binding SearchHitLimit, Converter={StaticResource BoolToVis}}">

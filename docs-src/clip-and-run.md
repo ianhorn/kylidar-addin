@@ -7,6 +7,37 @@ tiles are in regular LAZ format (not COPC), and should be downloaded using the
 [kyfromabove-stac-addin](https://ianhorn.github.io/kyfromabove-stac-addin/) tool instead. Phases 2
 and 3 are COPC-backed and supported here.
 
+## STAC API sources
+
+By default Kylidar searches the built-in **KyFromAbove** catalog. **Bring Your Own API...** (under
+**STAC API** in the pane) lets you search another STAC API too, the same feature as in the
+[kyfromabove-stac-addin](https://ianhorn.github.io/kyfromabove-stac-addin/):
+
+- **Pick from STAC Index or type a URL.** The dialog lists public, searchable APIs from
+  [stacindex.org](https://stacindex.org) (private/login-required catalogs are left out), or you can
+  enter any STAC API base URL yourself.
+- **Add or Replace.** **Add** keeps the current sources and adds this one alongside them; **Replace
+  all sources** searches only the new API. Picking KyFromAbove with Replace restores the original.
+  Each source appears as a chip under the button; the **x** removes one (the sole source can't be
+  removed).
+- **Collections are discovered, then checked.** KyFromAbove keeps its **Phase 1/2/3** checkboxes
+  (its three LiDAR collections are already known). For any other source Kylidar fetches the API's
+  collections right after you add it and lists them as checkboxes, labeled with the source name.
+  Phase 2/3 are greyed out while KyFromAbove isn't one of the active sources.
+- **One search across all sources.** **Search Catalog**, **Run** and **Export Script** combine the
+  checked collections from every source into one list of tiles. A source that errors or can't be
+  reached is skipped with a note in the log, and the rest still run; only if every source fails
+  does the search fail. The search limit applies to each source separately.
+- **Only LiDAR is downloaded.** Whatever collections you check, only assets that look like point
+  clouds (`.las`/`.laz`/`.copc.laz`, by filename) become tiles.
+
+!!! warning "Experimental"
+    Search, collection listing and the download/convert pipeline are only tested against
+    KyFromAbove's catalog and against listing/searching a few other APIs (for example Microsoft's
+    Planetary Computer, which has 3DEP LiDAR collections). Other APIs may behave differently.
+    Hydro-enforced breaklines stay Kentucky-specific regardless of source, and still need Phase 2
+    or 3 checked.
+
 ## Search Catalog
 
 Click **Search Catalog** to preview how many tiles intersect your current AOI and phase selection,
