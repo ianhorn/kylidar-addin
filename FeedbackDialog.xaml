@@ -1,0 +1,86 @@
+<Window x:Class="KylidarAddin.FeedbackDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Feedback"
+        Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="White">
+    <!--
+      Standalone Window, same reasoning as ExportScriptDialog: outside Pro's resource dictionaries,
+      so colors are explicit rather than inherited from Pro's theme.
+
+      Two panels sharing one dialog instead of a picker-then-navigate flow: ChoicePanel offers the
+      two paths (GitHub, which needs an account and leaves the dialog immediately via the browser;
+      or Direct, which has no account requirement and stays in-app) and DirectPanel is the small
+      message form shown in its place once "Send Feedback Directly" is clicked. Both panels occupy
+      the same grid row; only one is visible at a time (see FeedbackDialog.xaml.cs).
+    -->
+    <Window.Resources>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="BorderBrush" Value="Gray"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Have a bug, an idea, or a question about Kylidar?" FontWeight="SemiBold"
+                   Foreground="Black" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+        <StackPanel Grid.Row="1" x:Name="ChoicePanel">
+            <Button x:Name="GitHubButton" Click="GitHubButton_Click" HorizontalContentAlignment="Stretch" Padding="10,8" Margin="0,0,0,6"
+                    Background="White" Foreground="Black" BorderBrush="Gray">
+                <StackPanel>
+                    <TextBlock Text="Report an Issue on GitHub" FontWeight="SemiBold"/>
+                    <TextBlock Text="Opens your browser. Needs a free GitHub account; anyone can read it." FontSize="11" Foreground="#555555" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Button>
+            <Button x:Name="DirectButton" Click="DirectButton_Click" HorizontalContentAlignment="Stretch" Padding="10,8"
+                    Background="White" Foreground="Black" BorderBrush="Gray">
+                <StackPanel>
+                    <TextBlock Text="Send Feedback Directly" FontWeight="SemiBold"/>
+                    <TextBlock Text="No account needed. Goes straight to the developer, not publicly visible." FontSize="11" Foreground="#555555" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Button>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" x:Name="DirectPanel" Visibility="Collapsed">
+            <TextBlock Text="Message" Foreground="Black" Margin="0,0,0,2"/>
+            <TextBox x:Name="MessageTextBox" Height="110" AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" Margin="0,0,0,8"/>
+            <TextBlock Text="Your email (optional -- only if you'd like a reply)" Foreground="Black" Margin="0,0,0,2"/>
+            <TextBox x:Name="EmailBox" Margin="0,0,0,2"/>
+            <TextBlock Text="The add-in and ArcGIS Pro version are attached automatically." FontSize="11"
+                       Foreground="#555555" Margin="0,0,0,2"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="2" x:Name="StatusText" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="BackButton" Content="Back" Padding="10,4" Margin="0,0,6,0" Click="Back_Click" Visibility="Collapsed"/>
+            <Button x:Name="CloseButton" Content="Close" Padding="10,4" Margin="0,0,6,0" Click="Close_Click" IsCancel="True"/>
+            <Button x:Name="SendButton" Content="Send" Padding="10,4" Click="Send_Click" IsDefault="True" Visibility="Collapsed"/>
+        </StackPanel>
+    </Grid>
+</Window>

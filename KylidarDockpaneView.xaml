@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:local="clr-namespace:KylidarAddin"
              mc:Ignorable="d"
              d:DesignHeight="640" d:DesignWidth="300">
     <!--
@@ -14,6 +15,10 @@
     -->
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <!-- A status/validation line (e.g. ValidationText, ExportScriptStatusText) otherwise reserves
+             a full line's height even with nothing in it, leaving a visible dead gap between the
+             rows around it. This collapses it to zero height until there's actually text to show. -->
+        <local:EmptyStringToCollapsedConverter x:Key="StringToVis"/>
         <Style x:Key="InfoButtonStyle" TargetType="Button">
             <Setter Property="Width" Value="18"/>
             <Setter Property="Height" Value="18"/>
@@ -29,6 +34,16 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="10">
 
+            <!-- Feedback opens a dialog to report a bug/request a feature (GitHub, or straight to
+                 the developer with no account needed; see FeedbackDialog.xaml); Help opens the
+                 docs site. Same Feedback/Help pair and placement as kyfromabove-stac-addin's pane. -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,8">
+                <Button Content="Feedback" Command="{Binding FeedbackCommand}" Padding="10,3" Margin="0,0,6,0"
+                        ToolTip="Report a bug, request a feature, or send feedback directly."/>
+                <Button Content="Help" Command="{Binding HelpCommand}" Padding="10,3"
+                        ToolTip="Open the Kylidar documentation site."/>
+            </StackPanel>
+
             <TextBlock Text="Area of Interest" FontWeight="Bold" Margin="0,0,0,4"/>
             <UniformGrid Columns="2" Rows="2">
                 <Button Content="Draw Point" Command="{Binding DrawPointCommand}" Margin="2" Padding="6,3"/>
@@ -36,6 +51,8 @@
                 <Button Content="Draw Polygon" Command="{Binding DrawPolygonCommand}" Margin="2" Padding="6,3"/>
                 <Button Content="Select Feature" Command="{Binding SelectFeatureCommand}" Margin="2" Padding="6,3"/>
             </UniformGrid>
+            <Button Content="Browse for File..." Command="{Binding BrowseAoiFileCommand}" Margin="2,4,2,0" Padding="6,3"
+                    ToolTip="Pick a shapefile or geodatabase feature class from disk and use its (unioned) features as the AOI -- it doesn't need to already be a layer on the map."/>
             <Button Content="Clear Selection" Command="{Binding ClearAoiCommand}" HorizontalAlignment="Left" Margin="2,4,2,0" Padding="6,3"/>
             <TextBlock Text="{Binding AoiStatusText}" TextWrapping="Wrap" Margin="0,4,0,12"/>
 
@@ -46,11 +63,11 @@
                 <CheckBox Content="Phase 1" IsChecked="{Binding Phase1}" IsEnabled="False" Margin="0,0,10,0"
                           ToolTip="Phase 1 is in regular LAZ format and should be downloaded using the kyfromabove-stac add-in tool."/>
                 <CheckBox Content="Phase 2" IsChecked="{Binding Phase2}" Margin="0,0,10,0"/>
-                <CheckBox Content="Phase 3" IsChecked="{Binding Phase3}"/>
+                <CheckBox Content="Phase 3" IsChecked="{Binding Phase3}" Margin="0,0,14,0"/>
+                <Button Content="Search Catalog" Command="{Binding SearchCatalogCommand}" Padding="10,3"/>
             </StackPanel>
-
-            <Button Content="Search Catalog" Command="{Binding SearchCatalogCommand}" HorizontalAlignment="Left" Padding="10,3" Margin="0,0,0,4"/>
-            <TextBlock Text="{Binding CatalogSearchStatusText}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+            <TextBlock Text="{Binding CatalogSearchStatusText}" TextWrapping="Wrap" Margin="0,0,0,4"
+                       Visibility="{Binding CatalogSearchStatusText, Converter={StaticResource StringToVis}}"/>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,10" Visibility="{Binding SearchHitLimit, Converter={StaticResource BoolToVis}}">
                 <TextBlock Text="Search limit:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                 <TextBox Width="70" Text="{Binding SearchLimitText, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
@@ -76,6 +93,12 @@
                     <Button Content="i" Style="{StaticResource InfoButtonStyle}"
                             ToolTip="Downloads the raw tile(s), converts to .las, then deletes the raw copies. Least disk space of the conversion options, but you'd need to re-download the raw tile(s) if wanted again."/>
                 </StackPanel>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                <CheckBox Content="Compress to zLAS (.zlas)" IsChecked="{Binding CompressToZlas}" VerticalAlignment="Center"/>
+                <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                        ToolTip="Compresses the converted .las file(s) to Esri's own zLAS format via the Convert LAS geoprocessing tool (needs the 3D Analyst extension). Only applies to the two convert modes above -- has no effect on 'Download COPC file(s) only'. Not available in Export Script, which has no ArcGIS Pro to call that tool from."/>
             </StackPanel>
 
             <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
@@ -136,7 +159,8 @@
                         ToolTip="Downloads the KyFromAbove hydro-enforced breaklines inside the AOI (Phase 2 and 3; Phase 1 has no elevation values), clips them to it (the AOI plus buffer when clipping), reprojects to EPSG:3089, and adds them to the LAS dataset as a Hard_Line surface constraint. Needs a polygon AOI, or 'Clip to area of interest' with a buffer. If the download fails, the dataset is still built without them."/>
             </StackPanel>
 
-            <TextBlock Text="{Binding ValidationText}" Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,6"/>
+            <TextBlock Text="{Binding ValidationText}" Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,6"
+                       Visibility="{Binding ValidationText, Converter={StaticResource StringToVis}}"/>
 
             <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                 <Button Content="Run" Command="{Binding RunCommand}" Padding="14,4" Margin="0,0,8,0"/>
@@ -144,7 +168,8 @@
                 <Button Content="Export Script..." Command="{Binding ExportScriptCommand}" Padding="14,4"
                         ToolTip="Write a stand-alone download/convert script for the current AOI's tiles, to run without ArcGIS Pro."/>
             </StackPanel>
-            <TextBlock Text="{Binding ExportScriptStatusText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+            <TextBlock Text="{Binding ExportScriptStatusText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                       Visibility="{Binding ExportScriptStatusText, Converter={StaticResource StringToVis}}"/>
 
             <TextBlock Text="Progress" FontWeight="Bold" Margin="0,0,0,4"/>
             <ListBox ItemsSource="{Binding LogLines}" Height="160" FontFamily="Consolas" FontSize="11" Margin="0,0,0,4"

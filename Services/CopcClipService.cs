@@ -13,6 +13,9 @@
  * (see "Clip to area of interest" in the dock pane) each tile can also be cropped down to the AOI
  * (plus an optional buffer -- see PrepareAoi) during conversion, via PDAL. Clipping only applies to
  * the two convert modes -- DownloadTilesOnlyAsync never runs PDAL, so there's nothing to crop.
+ * Also convert-mode-only: "Compress to zLAS" additionally compresses each tile's .las to Esri's own
+ * .zlas format via ConvertLasService (a 3D Analyst geoprocessing tool -- PDAL can't write zLAS
+ * itself), discarding the uncompressed .las once the .zlas sibling exists.
  * Every conversion converts each local tile to its own .las in its OWN PDAL process, run
  * concurrently -- one shared pipeline covering every tile (an earlier approach here) runs as a
  * single Python/PDAL process, so it can't use more than one core no matter how many tiles there
@@ -234,9 +237,15 @@ namespace KylidarAddin.Services
         /// Null/empty: every tile is converted in full, no cropping. Non-empty: each tile is cropped
         /// to these AOI part(s) (already buffered -- see PrepareAoi) during conversion.
         /// </param>
+        /// <param name="compressToZlas">
+        /// After PDAL produces each tile's .las, additionally compress it to Esri's own zLAS format
+        /// (.zlas) via ConvertLasService -- PDAL itself can't write zLAS, only LASzip/.laz. The
+        /// uncompressed .las is deleted once its .zlas sibling exists, so OutputPaths ends up
+        /// pointing at .zlas files instead of .las ones.
+        /// </param>
         public static async Task<ClipResult> ConvertToLasAsync(
             string geoJson, IReadOnlyCollection<string> collections,
-            bool keepRawCopc, string outputFolder, IReadOnlyList<string> cropWktParts,
+            bool keepRawCopc, string outputFolder, IReadOnlyList<string> cropWktParts, bool compressToZlas,
             IProgress<string> progress, IProgress<RunProgress> runProgress = null,
             int searchLimit = DefaultSearchLimit, CancellationToken ct = default)
         {
@@ -321,6 +330,21 @@ namespace KylidarAddin.Services
                 catch (PdalStageFailedException ex)
                 {
                     return new ClipResult { Success = false, Error = ex.Message };
+                }
+
+                if (compressToZlas)
+                {
+                    progress?.Report($"Compressing {outputPaths.Count} .las file(s) to zLAS...");
+                    var zlasPaths = new List<string>(outputPaths.Count);
+                    foreach (var lasPath in outputPaths)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var zlasPath = await ConvertLasService.CompressToZlasAsync(lasPath, progress).ConfigureAwait(false);
+                        if (zlasPath == null)
+                            return new ClipResult { Success = false, Error = $"Couldn't compress {Path.GetFileName(lasPath)} to zLAS." };
+                        zlasPaths.Add(zlasPath);
+                    }
+                    outputPaths = zlasPaths;
                 }
 
                 return new ClipResult { Success = true, OutputPaths = outputPaths };

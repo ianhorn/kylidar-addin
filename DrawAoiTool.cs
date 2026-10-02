@@ -49,6 +49,17 @@ namespace KylidarAddin
             Description = null;
             Changed?.Invoke(null, EventArgs.Empty);
         }
+
+        /// <summary>Union a set of shapes into one AOI geometry, grouped by geometry dimension first
+        /// (point/multipoint vs polyline vs polygon/envelope all union separately, since
+        /// GeometryEngine.Union requires matching dimension) then folded together. Shared by
+        /// SelectFeatureAoiTool (shapes come from the active map's selection) and the dock pane's
+        /// "Browse for File..." command (shapes come from a file on disk, see AoiFileService).
+        /// Caller guarantees shapes is non-empty. Must run on the MCT thread (inside QueuedTask.Run).</summary>
+        public static Geometry UnionByDimension(IEnumerable<Geometry> shapes) =>
+            shapes.GroupBy(s => s.GeometryType)
+                .Select(g => g.Count() == 1 ? g.First() : GeometryEngine.Instance.Union(g))
+                .Aggregate((a, b) => GeometryEngine.Instance.Union(a, b));
     }
 
     internal abstract class DrawAoiToolBase : MapTool
@@ -183,13 +194,7 @@ namespace KylidarAddin
 
                     if (shapes.Count == 0) return ((Geometry)null, 0);
 
-                    // Union requires matching geometry dimension (point/multipoint vs polyline vs
-                    // polygon/envelope) -- batch-union within each dimension group (fast, one native
-                    // call instead of N-1 pairwise calls), then fold the handful of group results.
-                    var result = shapes
-                        .GroupBy(s => s.GeometryType)
-                        .Select(g => g.Count() == 1 ? g.First() : GeometryEngine.Instance.Union(g))
-                        .Aggregate((a, b) => GeometryEngine.Instance.Union(a, b));
+                    var result = AoiState.UnionByDimension(shapes);
 
                     return (result, shapes.Count);
                 });

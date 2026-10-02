@@ -27,6 +27,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Input;
 using ArcGIS.Core.Geometry;
 using ArcGIS.Desktop.Framework;
@@ -92,6 +93,7 @@ namespace KylidarAddin
         public ICommand DrawLineCommand => new RelayCommand(() => ActivateTool(DrawLineAoiTool.ToolId));
         public ICommand DrawPolygonCommand => new RelayCommand(() => ActivateTool(DrawPolygonAoiTool.ToolId));
         public ICommand SelectFeatureCommand => new RelayCommand(() => ActivateTool(SelectFeatureAoiTool.ToolId));
+        public ICommand BrowseAoiFileCommand => new RelayCommand(async () => await BrowseAoiFileAsync());
         public ICommand ClearAoiCommand => new RelayCommand(ClearAoi, () => AoiState.Current != null);
 
         private static async void ClearAoi()
@@ -100,6 +102,71 @@ namespace KylidarAddin
             var mapView = MapView.Active;
             if (mapView?.Map != null)
                 await QueuedTask.Run(() => mapView.Map.SetSelection(null));
+        }
+
+        /// <summary>Lets a shapefile or geodatabase feature class on disk become the AOI without it
+        /// first needing to be added as a layer -- ArcGIS.Desktop.Catalog.OpenItemDialog (the same
+        /// Browse dialog used throughout Pro) rather than a plain Windows file picker, so it can
+        /// browse into a .gdb. See AoiFileService for the read/union step.</summary>
+        private async Task BrowseAoiFileAsync()
+        {
+            var dialog = new ArcGIS.Desktop.Catalog.OpenItemDialog
+            {
+                Title = "Browse for an AOI feature class or shapefile",
+                MultiSelect = false,
+                Filter = ArcGIS.Desktop.Catalog.ItemFilters.FeatureClasses_All
+            };
+            if (dialog.ShowDialog() != true) return;
+
+            var item = System.Linq.Enumerable.FirstOrDefault(dialog.Items);
+            if (item == null) return;
+
+            try
+            {
+                var geometry = await QueuedTask.Run(() =>
+                    AoiFileService.ReadAoiFromFile(item.Path, MapView.Active?.Map?.SpatialReference));
+
+                if (geometry == null)
+                {
+                    MessageBox.Show("That file has no features to use as an AOI.",
+                        "Kylidar", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                AoiState.Set(geometry, $"AOI from {item.Name}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Couldn't use \"{item.Name}\" as an AOI: {ex.Message}",
+                    "Kylidar", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        #endregion
+
+        #region Feedback / Help
+
+        /// <summary>Opens a dialog to report a bug/request a feature -- either on GitHub, or
+        /// straight to the developer with no account needed. See FeedbackDialog.xaml.</summary>
+        public ICommand FeedbackCommand => new RelayCommand(ShowFeedbackDialog);
+
+        private static void ShowFeedbackDialog() =>
+            new FeedbackDialog { Owner = System.Windows.Application.Current?.MainWindow }.ShowDialog();
+
+        /// <summary>Opens the docs site in the user's default browser -- same pattern as
+        /// kyfromabove-stac-addin's Help button.</summary>
+        public ICommand HelpCommand => new RelayCommand(OpenHelp);
+
+        private static void OpenHelp()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(FeedbackService.DocsSiteUrl) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Couldn't open the browser: {ex.Message}\n\nYou can find the docs directly at {FeedbackService.DocsSiteUrl}",
+                    "Kylidar", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         #endregion
@@ -262,6 +329,14 @@ namespace KylidarAddin
             set { if (value) SelectedOutputMode = OutputMode.ConvertDiscardCopc; else NotifyPropertyChanged(nameof(IsConvertDiscardCopcSelected)); }
         }
 
+        private bool _compressToZlas;
+        /// <summary>Compress each converted tile's .las to Esri's own zLAS format (.zlas) via
+        /// ConvertLasService -- a 3D Analyst geoprocessing tool, since PDAL itself can't write zLAS.
+        /// Only takes effect with a convert output mode (see IsDownloadCopcOnlySelected); like
+        /// ClipToAoi, it's always enabled rather than disabled for "download COPC only", with the
+        /// tooltip explaining when it applies.</summary>
+        public bool CompressToZlas { get => _compressToZlas; set => SetProperty(ref _compressToZlas, value); }
+
         private bool _clipToAoi;
         /// <summary>Off by default -- clipping is the exception, not the default.</summary>
         public bool ClipToAoi
@@ -300,7 +375,28 @@ namespace KylidarAddin
         }
 
         private static string DefaultOutputFolder() =>
-            Path.Combine(Path.GetTempPath(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}");
+            Path.Combine(DefaultWorkspaceFolder(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}");
+
+        /// <summary>The current project's own home folder (the directory holding the .aprx) when a
+        /// project is open, rather than the Windows user temp directory -- and specifically NOT
+        /// ArcGIS Pro's own per-session scratch folder (e.g. ...\Temp\ArcGISProTempNNNN\, which
+        /// Path.GetTempPath() resolves into here, since Pro sets TEMP/TMP for its own process): Pro
+        /// deletes that folder when it closes, which would silently lose any downloaded/converted
+        /// output left there. Each call site appends its own kylidar_clip_&lt;timestamp&gt; name, so
+        /// separate runs still land in their own folder rather than overwriting one another. Falls
+        /// back to the plain Windows temp directory if there's no open project or no home folder.</summary>
+        private static string DefaultWorkspaceFolder()
+        {
+            try
+            {
+                var homeFolder = ArcGIS.Desktop.Core.Project.Current?.HomeFolderPath;
+                return !string.IsNullOrEmpty(homeFolder) ? homeFolder : Path.GetTempPath();
+            }
+            catch
+            {
+                return Path.GetTempPath();
+            }
+        }
 
         public ICommand BrowseOutputFolderCommand => new RelayCommand(BrowseOutputFolder);
 
@@ -377,7 +473,7 @@ namespace KylidarAddin
         public bool CanAddBreaklines => SelectedDatasetAction != DatasetAction.None;
 
         private static string DefaultNewDatasetPath() =>
-            Path.Combine(Path.GetTempPath(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}.lasd");
+            Path.Combine(DefaultWorkspaceFolder(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}.lasd");
 
         public ICommand BrowseNewDatasetCommand => new RelayCommand(BrowseNewDataset);
         public ICommand BrowseExistingDatasetCommand => new RelayCommand(BrowseExistingDataset);
@@ -697,7 +793,7 @@ namespace KylidarAddin
                 else
                 {
                     bool keepRawCopc = SelectedOutputMode == OutputMode.ConvertKeepCopc;
-                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, collections, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, progress, runProgress, searchLimit, _cts.Token);
+                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, collections, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, CompressToZlas, progress, runProgress, searchLimit, _cts.Token);
                 }
 
                 // After the point data so a breakline problem can't cost the tiles; still inside

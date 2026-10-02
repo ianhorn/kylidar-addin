@@ -1,6 +1,9 @@
+using System;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Media;
 
 namespace KylidarAddin
@@ -78,5 +81,17 @@ namespace KylidarAddin
             _openInfo = pinned;
             pinned.IsOpen = true;
         }
+    }
+
+    /// <summary>Collapses a status/validation TextBlock when its bound string is null/empty, instead
+    /// of the blank line it would otherwise always reserve (WPF doesn't zero-size a TextBlock just
+    /// because its Text is empty) -- see KylidarDockpaneView.xaml's "StringToVis" resource.</summary>
+    public class EmptyStringToCollapsedConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+            string.IsNullOrEmpty(value as string) ? Visibility.Collapsed : Visibility.Visible;
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+            throw new NotSupportedException();
     }
 }
