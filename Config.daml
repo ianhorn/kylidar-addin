@@ -4,7 +4,7 @@
         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:schemaLocation="http://schemas.esri.com/DADF/Registry file:///C:/Program%20Files/ArcGIS/Pro/bin/ArcGIS.Desktop.Framework.xsd">
 
-  <AddInInfo id="{f2cadbcc-46f7-48b0-8cb4-9b56b3eb038d}" version="1.1.0.0" desktopVersion="3.6.0" product="ArcGISPro">
+  <AddInInfo id="{f2cadbcc-46f7-48b0-8cb4-9b56b3eb038d}" version="1.2.0.0" desktopVersion="3.6.0" product="ArcGISPro">
     <Name>Kylidar Add-in</Name>
     <Description>Kylidar Add-in description</Description>
     <Image>Images\AddInDesktop32.png</Image>
