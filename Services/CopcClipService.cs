@@ -1,7 +1,7 @@
 /*
  * Given an AOI geometry (map CRS) and the LiDAR phase(s)/collections to search -- across one or
- * more STAC API sources, see SourceCollections and KylidarDockpaneViewModel's "Bring Your Own API"
- * handling -- three output modes are supported (see the dock pane's Output section -- fastest to
+ * more STAC API sources (currently only KyFromAbove, see SourceCollections) --
+ * three output modes are supported (see the dock pane's Output section -- fastest to
  * most disk-hungry):
  *   - DownloadTilesOnlyAsync: search the STAC catalog and download each matching tile's raw file
  *     (COPC or plain LAZ) as-is -- no PDAL involved at all. Fastest, least disk. Never clips.
@@ -22,7 +22,7 @@
  * concurrently -- one shared pipeline covering every tile (an earlier approach here) runs as a
  * single Python/PDAL process, so it can't use more than one core no matter how many tiles there
  * are; a separate process per tile gets genuine OS-level parallelism instead. Concurrency is capped
- * at 50% of the core count for this CPU-bound step (see MaxTileConvertConcurrency -- leaves the
+ * at 25% of the core count for this CPU-bound step (see MaxTileConvertConcurrency -- leaves the
  * rest of the system, Pro's own UI thread included, some headroom) and throttled back further under
  * memory pressure (see RunWithAdaptiveConcurrencyAsync), since process count -- not point count --
  * is what drives memory footprint here. The earlier, network-bound tile-fetch step uses a separate,
@@ -88,7 +88,7 @@ namespace KylidarAddin.Services
         /// would allow using all-but-one), while the 75% cap keeps this from creeping up toward
         /// "every core but 2" on big machines (e.g. 62 of 64) where that stops leaving meaningful
         /// headroom. This step is network-bound, not CPU-bound (barely touches the CPU) -- a looser
-        /// cap than MaxTileConvertConcurrency's 50%, which governs the actually CPU-bound convert
+        /// cap than MaxTileConvertConcurrency's 25%, which governs the actually CPU-bound convert
         /// step below. A large value here means that many simultaneous full-file HTTP downloads
         /// against the same host -- worth watching for if that host starts throttling/erroring
         /// under load.
@@ -138,8 +138,8 @@ namespace KylidarAddin.Services
         public const int DefaultSearchLimit = 200;
 
         /// <summary>One API source plus which of its collections to search -- the built-in KyFromAbove
-        /// source always searches its known laz-phase1/2/3 collections; a "Bring Your Own" source
-        /// searches whichever of its discovered collections the user checked (see
+        /// source always searches its known laz-phase1/2/3 collections; another source would
+        /// search whichever collections it is given (see
         /// KylidarDockpaneViewModel.BuildSourceCollections). Every public search entry point below
         /// takes a list of these instead of a flat collection-ID list, so a run can combine tiles
         /// from more than one STAC API in a single search/download/convert pass.</summary>
@@ -227,8 +227,7 @@ namespace KylidarAddin.Services
         }
 
         /// <summary>Searches every source independently and merges their tiles -- one unreachable or
-        /// erroring "Bring Your Own" source is reported via progress and otherwise ignored, the same
-        /// way the dock pane's "Load Collections" step tolerates a bad source, rather than failing
+        /// erroring source is reported via progress and otherwise ignored, rather than failing
         /// the whole search. Fails only if every source errored and none produced a tile.</summary>
         private static async Task<TileSearchResult> SearchTilesAsync(
             string geoJson, IReadOnlyList<SourceCollections> sources, int limit, IProgress<string> progress, CancellationToken ct)
@@ -425,12 +424,13 @@ namespace KylidarAddin.Services
         }
 
         /// <summary>
-        /// Cap per-tile PDAL process concurrency at 50% of logical cores rather than 100%: each
+        /// Cap per-tile PDAL process concurrency at 25% of logical cores rather than 100%: each
         /// process is CPU-bound (LAZ decompression, format conversion, and -- when clipping --
-        /// cropping/merging), so saturating every core leaves nothing for the rest of the system --
+        /// cropping/merging) and each holds a tile in memory, so saturating every core leaves nothing for
+        /// the rest of the system --
         /// ArcGIS Pro's own UI thread included -- to stay responsive while a big run is going.
         /// </summary>
-        private static int MaxTileConvertConcurrency => Math.Max(1, (int)(Environment.ProcessorCount * 0.50));
+        private static int MaxTileConvertConcurrency => Math.Max(1, (int)(Environment.ProcessorCount * 0.25));
 
         /// <summary>Run one PDAL process per tile, concurrently (see RunWithAdaptiveConcurrencyAsync
         /// for the concurrency/memory policy). <paramref name="outputPaths"/> is parallel to

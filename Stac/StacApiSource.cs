@@ -1,7 +1,6 @@
 /*
- * One STAC API endpoint the dock pane can search. The built-in KyFromAbove catalog is always
- * present as the default source; "Bring Your Own API" adds another source alongside it, or
- * replaces the whole list with a different endpoint.
+ * One STAC API endpoint the dock pane can search. Kylidar uses only the built-in KyFromAbove
+ * catalog, but the search code takes a list of sources.
  *
  * Ported from kyfromabove-ext (same class, same name) -- see that add-in's StacApiSource.cs.
  * Each source owns its own StacClient; that's safe since StacClient's HttpClient/

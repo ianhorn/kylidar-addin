@@ -67,3 +67,10 @@ or polygon), buffered first if you've entered a buffer and turned on clipping (s
 [Clipping](clip-and-run.md#clipping-to-the-area-of-interest)) -- otherwise the buffer field has no
 effect at all. Every tile that intersects that search area is downloaded in full; clipping (when
 enabled) only affects what each tile is *cropped to* during conversion, not which tiles are found.
+
+## Current Extent
+
+Click **Current Extent** to use the area currently visible in the active map as the AOI -- a
+rectangle matching the map view. Pan and zoom first, then click it. Nothing is drawn on the map and
+no Map Notes feature is created; clicking again after moving the map replaces the AOI. Keep the
+extent modest: a full-state view will match a very large number of tiles.

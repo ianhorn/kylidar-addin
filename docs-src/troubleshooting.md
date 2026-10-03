@@ -93,7 +93,8 @@ This needs the **3D Analyst** extension -- the same one the LAS dataset tools al
 in this add-in. If it isn't licensed on your machine, the run fails with whatever error Convert LAS
 reports; check **Project → Licensing** (or your organization's ArcGIS license manager) for 3D
 Analyst. The tiles themselves still convert to `.las` before this step runs, so nothing earlier in
-the run is lost -- only the compression step fails.
+the run is lost -- only the compression step fails. Since **Compress to zLAS** is on by default,
+the simplest fix without 3D Analyst is to uncheck it and run again.
 
 ## Run/Search Catalog/Export Script stays disabled
 

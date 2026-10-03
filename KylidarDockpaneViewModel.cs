@@ -47,6 +47,7 @@ namespace KylidarAddin
 
         protected KylidarDockpaneViewModel()
         {
+            ArcGIS.Desktop.Core.Events.ProjectOpenedEvent.Subscribe(_ => RefreshDefaultLocations());
             // AOI changes come from a map-sketch completion, not an input event inside this pane,
             // so WPF's CommandManager.RequerySuggested (which RunCommand's CanExecute relies on)
             // never fires on its own -- without this, Run stays stale-disabled after finishing a
@@ -57,10 +58,6 @@ namespace KylidarAddin
                 CommandManager.InvalidateRequerySuggested();
             };
             UpdateAoiStatus();
-
-            // DynamicCollections has no "is this empty" binding of its own, so the checklist's
-            // Visibility (bound to HasDynamicCollections) needs telling whenever it changes.
-            DynamicCollections.CollectionChanged += (s, e) => NotifyPropertyChanged(nameof(HasDynamicCollections));
         }
 
         internal static void Show()
@@ -101,6 +98,25 @@ namespace KylidarAddin
         public ICommand SelectFeatureCommand => new RelayCommand(() => ActivateTool(SelectFeatureAoiTool.ToolId));
         public ICommand BrowseAoiFileCommand => new RelayCommand(async () => await BrowseAoiFileAsync());
         public ICommand ClearAoiCommand => new RelayCommand(ClearAoi, () => AoiState.Current != null);
+
+        public ICommand UseCurrentExtentCommand => new RelayCommand(async () => await UseCurrentExtentAsync(), () => MapView.Active != null);
+
+        /// <summary>Uses the active map view's visible extent as a rectangular polygon AOI.</summary>
+        private static async Task UseCurrentExtentAsync()
+        {
+            var mapView = MapView.Active;
+            if (mapView == null) return;
+            try
+            {
+                var polygon = await QueuedTask.Run(() => (Geometry)PolygonBuilderEx.CreatePolygon(mapView.Extent, mapView.Map.SpatialReference));
+                AoiState.Set(polygon, "AOI from current map extent");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Couldn't use the current extent as an AOI: {ex.Message}",
+                    "Kylidar", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
 
         private static async void ClearAoi()
         {
@@ -206,156 +222,23 @@ namespace KylidarAddin
 
         #endregion
 
-        #region STAC API sources
+        #region STAC API source
 
-        /// <summary>Which STAC APIs a run searches. The built-in KyFromAbove source is always
-        /// present at first run (a fresh StacClient, not a shared singleton -- cheap, since
-        /// StacClient's HttpClient/JsonSerializerOptions are static underneath, matching
-        /// StacApiSource's own design). "Bring Your Own API" adds another source alongside it, or
-        /// replaces the whole list -- see OnBringYourOwnApiAsync.</summary>
-        public ObservableCollection<StacApiSource> ApiSources { get; } = new ObservableCollection<StacApiSource>
-        {
-            new StacApiSource(StacIndexClient.BuiltInName, new StacClient(), isDefault: true)
-        };
+        /// <summary>Kylidar searches only the KyFromAbove catalog (a fresh StacClient, cheap since
+        /// its HttpClient/JsonSerializerOptions are static underneath). The service layer still takes
+        /// a list of (source, collections) pairs.</summary>
+        private readonly StacApiSource _kyFromAbove = new StacApiSource("KyFromAbove", new StacClient(), isDefault: true);
 
-        /// <summary>Collections discovered from "Bring Your Own" sources only -- the literal
-        /// KyFromAbove source keeps using the Phase 1/2/3 checkboxes below instead of a dynamic
-        /// list, since its three LiDAR collection IDs are already known. Populated by
-        /// LoadSourceCollectionsAsync right after a non-KyFromAbove source is added.</summary>
-        public ObservableCollection<CollectionCheckViewModel> DynamicCollections { get; } = new ObservableCollection<CollectionCheckViewModel>();
-
-        /// <summary>Backs the dynamic collections checklist's Visibility -- see the constructor's
-        /// CollectionChanged hook.</summary>
-        public bool HasDynamicCollections => DynamicCollections.Count > 0;
-
-        /// <summary>True while the literal KyFromAbove catalog is one of the active sources --
-        /// false after "Replace all sources" swaps it out for something else, in which case the
-        /// Phase 1/2/3 checkboxes have nothing to search (see ShowAoiClipComplexityWarning-style
-        /// always-visible-but-disabled precedent elsewhere in this pane).</summary>
-        public bool HasKyFromAboveSource => ApiSources.Any(IsKyFromAbove);
-
-        private static bool IsKyFromAbove(StacApiSource source) =>
-            string.Equals(source.BaseUri?.TrimEnd('/'), StacClient.DefaultBaseUri, StringComparison.OrdinalIgnoreCase);
-
-        private string _apiSourceStatusText = string.Empty;
-        public string ApiSourceStatusText
-        {
-            get => _apiSourceStatusText;
-            set => SetProperty(ref _apiSourceStatusText, value);
-        }
-
-        public ICommand BringYourOwnApiCommand => new RelayCommand(async () => await OnBringYourOwnApiAsync(), () => !IsRunning && !IsSearching);
-        public ICommand RemoveApiSourceCommand => new RelayCommand(
-            param => OnRemoveApiSource(param as StacApiSource),
-            param => !IsRunning && !IsSearching && (param as StacApiSource)?.CanRemove == true);
-
-        /// <summary>Open the "Bring Your Own API" dialog to add another STAC API alongside the
-        /// current sources, or replace them all. Ported from kyfromabove-ext's
-        /// SearchDockpaneViewModel.OnBringYourOwnApi.</summary>
-        private async Task OnBringYourOwnApiAsync()
-        {
-            var dlg = new AddApiSourceDialog { Owner = System.Windows.Application.Current?.MainWindow };
-            if (dlg.ShowDialog() != true || dlg.Result == AddApiSourceResult.Cancel) return;
-
-            if (dlg.Result == AddApiSourceResult.Add &&
-                ApiSources.Any(s => string.Equals(s.BaseUri?.TrimEnd('/'), dlg.BaseUrl, StringComparison.OrdinalIgnoreCase)))
-            {
-                ApiSourceStatusText = "That API is already one of the active sources.";
-                return;
-            }
-
-            // Picking Kentucky's catalog and replacing everything restores the original built-in
-            // source -- same special case kyfromabove-ext's dialog handler has.
-            var restoreBuiltIn = dlg.Result == AddApiSourceResult.Replace &&
-                string.Equals(dlg.BaseUrl, StacClient.DefaultBaseUri, StringComparison.OrdinalIgnoreCase);
-            var newSource = restoreBuiltIn
-                ? new StacApiSource(StacIndexClient.BuiltInName, new StacClient(), isDefault: true)
-                : new StacApiSource(
-                    string.IsNullOrWhiteSpace(dlg.SourceName) ? dlg.BaseUrl : dlg.SourceName,
-                    dlg.BaseUrl,
-                    isDefault: dlg.Result == AddApiSourceResult.Replace); // sole source after a replace behaves like the default (no "remove" button)
-
-            if (dlg.Result == AddApiSourceResult.Replace)
-            {
-                ApiSources.Clear();
-                ApiSources.Add(newSource);
-                DynamicCollections.Clear();
-                ApiSourceStatusText = restoreBuiltIn
-                    ? "Switched back to the built-in KyFromAbove catalog."
-                    : $"Switched to API source '{newSource.Name}'.";
-            }
-            else
-            {
-                ApiSources.Add(newSource);
-                ApiSourceStatusText = $"Added API source '{newSource.Name}'.";
-            }
-
-            NotifyPropertyChanged(nameof(HasKyFromAboveSource));
-            CommandManager.InvalidateRequerySuggested();
-
-            if (!IsKyFromAbove(newSource))
-                await LoadSourceCollectionsAsync(newSource);
-        }
-
-        /// <summary>Fetch and list one source's collections so they can be checked individually --
-        /// the dock pane's equivalent of kyfromabove-ext's "Load Collections" step, run
-        /// automatically right after a source is added rather than as a separate manual step, since
-        /// (unlike that add-in) only non-KyFromAbove sources ever need it here.</summary>
-        private async Task LoadSourceCollectionsAsync(StacApiSource source)
-        {
-            ApiSourceStatusText = $"Loading collections from '{source.Name}'...";
-            try
-            {
-                var collections = await source.Client.GetCollectionsAsync();
-                foreach (var c in collections)
-                    DynamicCollections.Add(new CollectionCheckViewModel(c, source));
-                ApiSourceStatusText = collections.Count > 0
-                    ? $"Loaded {collections.Count} collection(s) from '{source.Name}'. Check the ones to search."
-                    : $"'{source.Name}' has no collections to search.";
-            }
-            catch (Exception ex)
-            {
-                ApiSourceStatusText = $"Couldn't load collections from '{source.Name}': {ex.Message}";
-            }
-        }
-
-        /// <summary>Remove a "bring your own" source (the default KyFromAbove source can't be removed).</summary>
-        private void OnRemoveApiSource(StacApiSource source)
-        {
-            if (source == null || !source.CanRemove) return;
-            ApiSources.Remove(source);
-            foreach (var c in DynamicCollections.Where(c => c.Source == source).ToList())
-                DynamicCollections.Remove(c);
-            ApiSourceStatusText = $"Removed API source '{source.Name}'.";
-            NotifyPropertyChanged(nameof(HasKyFromAboveSource));
-            CommandManager.InvalidateRequerySuggested();
-        }
-
-        /// <summary>The combined (source, checked collections) list a search/run/export covers:
-        /// each KyFromAbove source searches its checked Phase 1/2/3 collections; every other active
-        /// source searches its own checked discovered collections. A source with nothing checked
-        /// contributes nothing -- so an inactive "Bring Your Own" source with no boxes ticked is
-        /// silently skipped rather than erroring.</summary>
+        /// <summary>The (source, checked collections) list a search/run/export covers.</summary>
         private List<CopcClipService.SourceCollections> BuildSourceCollections()
         {
+            var ids = new List<string>();
+            if (Phase1) ids.Add("laz-phase1");
+            if (Phase2) ids.Add("laz-phase2");
+            if (Phase3) ids.Add("laz-phase3");
             var result = new List<CopcClipService.SourceCollections>();
-            foreach (var source in ApiSources)
-            {
-                List<string> ids;
-                if (IsKyFromAbove(source))
-                {
-                    ids = new List<string>();
-                    if (Phase1) ids.Add("laz-phase1");
-                    if (Phase2) ids.Add("laz-phase2");
-                    if (Phase3) ids.Add("laz-phase3");
-                }
-                else
-                {
-                    ids = DynamicCollections.Where(c => c.Source == source && c.IsChecked).Select(c => c.Id).ToList();
-                }
-                if (ids.Count > 0)
-                    result.Add(new CopcClipService.SourceCollections { Source = source, Collections = ids });
-            }
+            if (ids.Count > 0)
+                result.Add(new CopcClipService.SourceCollections { Source = _kyFromAbove, Collections = ids });
             return result;
         }
 
@@ -516,7 +399,9 @@ namespace KylidarAddin
             set { if (value) SelectedOutputMode = OutputMode.ConvertDiscardCopc; else NotifyPropertyChanged(nameof(IsConvertDiscardCopcSelected)); }
         }
 
-        private bool _compressToZlas;
+        // On by default: zLAS output is much smaller than plain .las. Turn it off if 3D Analyst isn't
+        // licensed (Convert LAS needs it) or the .las files are wanted as-is.
+        private bool _compressToZlas = true;
         /// <summary>Compress each converted tile's .las to Esri's own zLAS format (.zlas) via
         /// ConvertLasService -- a 3D Analyst geoprocessing tool, since PDAL itself can't write zLAS.
         /// Only takes effect with a convert output mode (see IsDownloadCopcOnlySelected); like
@@ -555,10 +440,11 @@ namespace KylidarAddin
         public bool ShowAoiClipComplexityWarning => ClipToAoi && IsPolygonAoi;
 
         private string _outputFolder = DefaultOutputFolder();
+        private bool _outputFolderIsAuto = true;   // still the generated default, so safe to regenerate
         public string OutputFolder
         {
             get => _outputFolder;
-            set => SetProperty(ref _outputFolder, value);
+            set { _outputFolderIsAuto = false; SetProperty(ref _outputFolder, value); }
         }
 
         private static string DefaultOutputFolder() =>
@@ -576,12 +462,39 @@ namespace KylidarAddin
         {
             try
             {
-                var homeFolder = ArcGIS.Desktop.Core.Project.Current?.HomeFolderPath;
+                var project = ArcGIS.Desktop.Core.Project.Current;
+                var homeFolder = project?.HomeFolderPath;
+                if (string.IsNullOrEmpty(homeFolder) && !string.IsNullOrEmpty(project?.Path))
+                    homeFolder = Path.GetDirectoryName(project.Path);
                 return !string.IsNullOrEmpty(homeFolder) ? homeFolder : Path.GetTempPath();
             }
             catch
             {
                 return Path.GetTempPath();
+            }
+        }
+
+        // The field initializers above run when the pane is first created, which can be before a
+        // project has finished opening (or before the user opens a different one), so they may have
+        // fallen back to the temp folder. Regenerate the defaults (see the constructor and OnShow) -- only the ones the user hasn't
+        // typed/browsed over -- whenever a project opens or the pane is shown.
+        protected override void OnShow(bool isVisible)
+        {
+            if (isVisible) RefreshDefaultLocations();
+            base.OnShow(isVisible);
+        }
+
+        private void RefreshDefaultLocations()
+        {
+            if (_outputFolderIsAuto)
+            {
+                _outputFolder = DefaultOutputFolder();
+                NotifyPropertyChanged(nameof(OutputFolder));
+            }
+            if (_newDatasetPathIsAuto)
+            {
+                _newDatasetPath = DefaultNewDatasetPath();
+                NotifyPropertyChanged(nameof(NewDatasetPath));
             }
         }
 
@@ -639,10 +552,11 @@ namespace KylidarAddin
         }
 
         private string _newDatasetPath = DefaultNewDatasetPath();
+        private bool _newDatasetPathIsAuto = true;
         public string NewDatasetPath
         {
             get => _newDatasetPath;
-            set => SetProperty(ref _newDatasetPath, value);
+            set { _newDatasetPathIsAuto = false; SetProperty(ref _newDatasetPath, value); }
         }
 
         private string _existingDatasetPath = string.Empty;

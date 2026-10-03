@@ -41,8 +41,8 @@ breaklines. The steps that follow explain each part.
 5. **(Optional) Clip to area of interest.** Check this to crop each tile to the AOI during
    conversion; a **Buffer (feet)** field appears when checked. See
    [Clipping](clip-and-run.md#clipping-to-the-area-of-interest).
-6. **(Optional) Compress to zLAS.** Check this to compress the converted `.las` output to Esri's
-   own zLAS format -- needs the 3D Analyst extension. See
+6. **Compress to zLAS.** On by default: compresses the converted `.las` output to Esri's own zLAS
+   format (needs the 3D Analyst extension) -- uncheck it to keep plain `.las`. See
    [Compress to zLAS](clip-and-run.md#compress-to-zlas).
 7. **Set the output folder.** Defaults to a timestamped folder inside the current project's own
    folder; use **Browse...** to pick somewhere else.

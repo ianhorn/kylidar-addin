@@ -64,22 +64,6 @@ namespace KylidarAddin.Stac
             Assets?.Values.Where(a => a != null && a.IsLidar) ?? Enumerable.Empty<StacAsset>();
     }
 
-    /// <summary>A STAC Collection summary, trimmed to what the "Bring Your Own API" collection
-    /// checklist needs (see KylidarDockpaneViewModel) -- just enough to label a checkbox.</summary>
-    public class StacCollection
-    {
-        [JsonPropertyName("id")] public string Id { get; set; }
-        [JsonPropertyName("title")] public string Title { get; set; }
-
-        public string TitleOrId => string.IsNullOrWhiteSpace(Title) ? Id : Title;
-    }
-
-    /// <summary>Wrapper for the /collections response.</summary>
-    public class StacCollectionsResponse
-    {
-        [JsonPropertyName("collections")] public List<StacCollection> Collections { get; set; } = new List<StacCollection>();
-    }
-
     /// <summary>A GeoJSON FeatureCollection returned by STAC search / items endpoints.</summary>
     public class StacItemCollection
     {

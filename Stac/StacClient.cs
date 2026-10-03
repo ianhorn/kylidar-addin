@@ -41,19 +41,6 @@ namespace KylidarAddin.Stac
 
         public string BaseUri { get; set; } = DefaultBaseUri;
 
-        /// <summary>Fetch every collection the catalog exposes -- backs the "Bring Your Own API"
-        /// collection checklist (see KylidarDockpaneViewModel), since a non-default source's
-        /// collection IDs aren't known ahead of time the way KyFromAbove's laz-phase1/2/3 are.</summary>
-        public async Task<List<StacCollection>> GetCollectionsAsync(CancellationToken ct = default)
-        {
-            var url = BaseUri.TrimEnd('/') + "/collections";
-            using var resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
-            await EnsureSuccessWithBodyAsync(resp, ct).ConfigureAwait(false);
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            var data = await JsonSerializer.DeserializeAsync<StacCollectionsResponse>(stream, _json, ct).ConfigureAwait(false);
-            return data?.Collections ?? new List<StacCollection>();
-        }
-
         /// <summary>
         /// Search for items intersecting a GeoJSON geometry (lon/lat, CRS84), via POST /search.
         /// </summary>
