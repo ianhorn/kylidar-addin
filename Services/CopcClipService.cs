@@ -114,15 +114,14 @@ namespace KylidarAddin.Services
             var searchGeometry = aoi;
             if (clipToAoi && bufferFeet > 0)
             {
-                double bufferMapUnits = bufferFeet;
-                if (aoi.SpatialReference?.Unit is LinearUnit lu && lu.ConversionFactor > 0)
-                {
-                    // ConversionFactor is meters per one unit of this SR's linear unit; convert the
-                    // requested feet distance into that unit so "buffer feet" means feet regardless
-                    // of the map's own units.
-                    bufferMapUnits = (bufferFeet * 0.3048) / lu.ConversionFactor;
-                }
-                searchGeometry = GeometryEngine.Instance.Buffer(aoi, bufferMapUnits);
+                // Geodesic, not the planar Buffer: a planar buffer of a point comes back as a polygon
+                // holding a single circular-arc segment (PointCount == 2), which the GeoJSON/WKT
+                // writers flatten to a collapsed ring -- the STAC search then fails with a 400 and
+                // PDAL has nothing to crop by. GeodesicBuffer returns a real vertex ring, and is
+                // also in true ground feet regardless of the map's projection (a planar buffer in
+                // Web Mercator is too big at Kentucky's latitude, and in a geographic map it is
+                // measured in degrees).
+                searchGeometry = GeometryEngine.Instance.GeodesicBuffer(aoi, bufferFeet, LinearUnit.Feet);
             }
 
             var searchWgs84 = (Geometry)GeometryEngine.Instance.Project(searchGeometry, SpatialReferences.WGS84);
