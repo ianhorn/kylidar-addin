@@ -96,6 +96,27 @@ Analyst. The tiles themselves still convert to `.las` before this step runs, so 
 the run is lost -- only the compression step fails. Since **Compress to zLAS** is on by default,
 the simplest fix without 3D Analyst is to uncheck it and run again.
 
+## "No points matched the point filter in any tile"
+
+Every tile came out with nothing left after filtering -- the classes (or the return types)
+you picked don't occur in the tiles for this AOI. Open **Point filter** and loosen it (for
+example add **Unclassified**, or press **All** under **Returns**), then run again. Classification
+varies by phase and area, so a class that exists elsewhere in Kentucky may simply be absent here.
+When only *some* tiles are empty the run still succeeds and the log lists the skipped ones.
+
+## Intensity looks very different on either side of a straight line
+
+A hard edge in an intensity (or other) rendering that lines up with a tile boundary is two tiles
+with different intensity scaling -- not overlap and not something the add-in introduces. Adjacent
+KyFromAbove tiles were often flown in different sessions: in one pair the median intensity was
+about 22,800 on one side and 44,900 on the other, so a single stretch renders one tile dark and the
+other bright. In Pro, symbolize each tile (or use a per-area standard-deviation or percent-clip
+stretch) rather than one stretch for the whole dataset. Elevation and classification are
+unaffected.
+
+A seam *within* a tile that follows a flight line is a different thing -- overlapping flight lines
+-- and **Exclude overlap points** in the [Point filter](clip-and-run.md#point-filter) targets that.
+
 ## Run/Search Catalog/Export Script stays disabled
 
 These require an AOI (draw or select one first). If you just finished drawing/selecting an AOI and

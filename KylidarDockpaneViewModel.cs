@@ -58,6 +58,9 @@ namespace KylidarAddin
                 CommandManager.InvalidateRequerySuggested();
             };
             UpdateAoiStatus();
+
+            PointClasses = new System.Collections.ObjectModel.ObservableCollection<PointClassOption>(
+                PointFilter.Classes.Select(c => new PointClassOption(c.Code, c.Label, OnPointFilterChanged)));
         }
 
         internal static void Show()
@@ -409,6 +412,88 @@ namespace KylidarAddin
         /// tooltip explaining when it applies.</summary>
         public bool CompressToZlas { get => _compressToZlas; set => SetProperty(ref _compressToZlas, value); }
 
+        #region Point filter
+
+        /// <summary>One checkbox per LAS class; all ticked (keep everything) by default.</summary>
+        public System.Collections.ObjectModel.ObservableCollection<PointClassOption> PointClasses { get; }
+
+        /// <summary>The preset buttons ("Ground only", ...), each ticking just its own classes.</summary>
+        public IReadOnlyList<PointClassPreset> PointClassPresets { get; } =
+            PointFilter.Presets.Select(p => new PointClassPreset(p.Name, p.Codes)).ToList();
+
+        public ICommand ApplyPointClassPresetCommand => new RelayCommand(param => ApplyPointClassPreset(param), param => true);
+
+        private void ApplyPointClassPreset(object param)
+        {
+            if (param is not IReadOnlyCollection<int> codes) return;
+            foreach (var option in PointClasses) option.SetSilently(codes.Contains(option.Code));
+            OnPointFilterChanged();
+        }
+
+        /// <summary>The preset buttons for the return checkboxes ("First (incl. single)", ...).</summary>
+        public IReadOnlyList<ReturnPreset> ReturnPresets { get; } =
+            PointFilter.ReturnPresets.Select(p => new ReturnPreset(p.Name, p.Groups)).ToList();
+
+        public ICommand ApplyReturnPresetCommand => new RelayCommand(param => ApplyReturnPreset(param), param => true);
+
+        private void ApplyReturnPreset(object param)
+        {
+            if (param is ReturnGroups groups) SetReturnGroups(groups);
+        }
+
+        private ReturnGroups _returnGroups = ReturnGroups.All;
+
+        private bool HasReturnGroup(ReturnGroups g) => _returnGroups.HasFlag(g);
+
+        private void SetReturnGroup(ReturnGroups g, bool on) =>
+            SetReturnGroups(on ? _returnGroups | g : _returnGroups & ~g);
+
+        private void SetReturnGroups(ReturnGroups groups)
+        {
+            _returnGroups = groups;
+            NotifyPropertyChanged(nameof(ReturnSingle));
+            NotifyPropertyChanged(nameof(ReturnFirst));
+            NotifyPropertyChanged(nameof(ReturnIntermediate));
+            NotifyPropertyChanged(nameof(ReturnLast));
+            OnPointFilterChanged();
+        }
+
+        private bool _excludeOverlap;
+        /// <summary>Drop points carrying the LAS 1.4 overlap flag (points from overlapping flight lines).</summary>
+        public bool ExcludeOverlap
+        {
+            get => _excludeOverlap;
+            set
+            {
+                if (SetProperty(ref _excludeOverlap, value)) OnPointFilterChanged();
+            }
+        }
+
+        // The four disjoint return groups (see PointFilter): ticking all four keeps every return.
+        public bool ReturnSingle { get => HasReturnGroup(ReturnGroups.Single); set => SetReturnGroup(ReturnGroups.Single, value); }
+        public bool ReturnFirst { get => HasReturnGroup(ReturnGroups.First); set => SetReturnGroup(ReturnGroups.First, value); }
+        public bool ReturnIntermediate { get => HasReturnGroup(ReturnGroups.Intermediate); set => SetReturnGroup(ReturnGroups.Intermediate, value); }
+        public bool ReturnLast { get => HasReturnGroup(ReturnGroups.Last); set => SetReturnGroup(ReturnGroups.Last, value); }
+
+        private void OnPointFilterChanged()
+        {
+            NotifyPropertyChanged(nameof(PointFilterHeader));
+            NotifyPropertyChanged(nameof(PointFilterIsEmpty));
+            CommandManager.InvalidateRequerySuggested();
+        }
+
+        /// <summary>The filter as currently chosen.</summary>
+        private PointFilter BuildPointFilter() =>
+            new PointFilter(PointClasses.Where(c => c.IsChecked).Select(c => c.Code), _returnGroups, _excludeOverlap);
+
+        /// <summary>The Expander header: says what is kept so it's visible while collapsed.</summary>
+        public string PointFilterHeader => $"Point filter: {BuildPointFilter().Summary()}";
+
+        /// <summary>True when no class is ticked -- shows a warning and blocks Run / Export Script.</summary>
+        public bool PointFilterIsEmpty => BuildPointFilter().IsEmpty;
+
+        #endregion
+
         private bool _clipToAoi;
         /// <summary>Off by default -- clipping is the exception, not the default.</summary>
         public bool ClipToAoi
@@ -576,6 +661,82 @@ namespace KylidarAddin
         private static string DefaultNewDatasetPath() =>
             Path.Combine(DefaultWorkspaceFolder(), $"kylidar_clip_{DateTime.Now:yyyyMMdd_HHmmss}.lasd");
 
+        #region LAS dataset coordinate system
+
+        // A new dataset's coordinate system. KyFromAbove's Phase 3 tiles carry a vertical coordinate
+        // system (NAVD88 height, ftUS) but Phase 2 tiles don't, so a dataset that just takes it from
+        // the tiles can end up with no vertical -- and Pro warns when such a layer is added to a scene
+        // that has one. CreateLasDataset's spatial_reference parameter assigns it explicitly (and a
+        // different horizontal system makes the dataset project on the fly).
+        private const int KentuckySingleZoneFtUsWkid = 3089;
+        private const int Navd88FtUsVcsWkid = 6360;
+
+        private int _lasdCoordinateSystemIndex; // 0 = Kentucky + NAVD88 (default), 1 = same as tiles, 2 = custom
+        public int LasdCoordinateSystemIndex
+        {
+            get => _lasdCoordinateSystemIndex;
+            set
+            {
+                SetProperty(ref _lasdCoordinateSystemIndex, value);
+                NotifyPropertyChanged(nameof(ShowCustomLasdCoordinateSystem));
+            }
+        }
+
+        public bool ShowCustomLasdCoordinateSystem => _lasdCoordinateSystemIndex == 2;
+
+        private string _customHorizontalWkid = KentuckySingleZoneFtUsWkid.ToString();
+        public string CustomHorizontalWkid { get => _customHorizontalWkid; set => SetProperty(ref _customHorizontalWkid, value); }
+
+        private string _customVerticalWkid = Navd88FtUsVcsWkid.ToString();
+        public string CustomVerticalWkid { get => _customVerticalWkid; set => SetProperty(ref _customVerticalWkid, value); }
+
+        /// <summary>The WKT passed to Create LAS Dataset as its coordinate system; null/empty keeps what
+        /// the tiles carry.</summary>
+        private string _lasdSpatialReferenceWkt;
+
+        /// <summary>Turns the chosen coordinate system into WKT, or returns an error message for a WKID
+        /// Pro doesn't know. Only relevant when creating a new dataset (an existing one has its own).</summary>
+        private async Task<string> ResolveLasdSpatialReferenceAsync()
+        {
+            _lasdSpatialReferenceWkt = null;
+            if (SelectedDatasetAction != DatasetAction.CreateNew) return null;
+
+            int horizontal, vertical = 0;
+            switch (_lasdCoordinateSystemIndex)
+            {
+                case 1:
+                    return null;
+                case 2:
+                    if (!int.TryParse(CustomHorizontalWkid?.Trim(), out horizontal) || horizontal <= 0)
+                        return "Enter the horizontal coordinate system as a WKID number (for example 3089).";
+                    if (!string.IsNullOrWhiteSpace(CustomVerticalWkid) &&
+                        (!int.TryParse(CustomVerticalWkid.Trim(), out vertical) || vertical <= 0))
+                        return "Enter the vertical coordinate system as a WKID number (for example 6360), or leave it blank for none.";
+                    break;
+                default:
+                    horizontal = KentuckySingleZoneFtUsWkid;
+                    vertical = Navd88FtUsVcsWkid;
+                    break;
+            }
+
+            try
+            {
+                _lasdSpatialReferenceWkt = await QueuedTask.Run(() =>
+                    (vertical > 0
+                        ? SpatialReferenceBuilder.CreateSpatialReference(horizontal, vertical)
+                        : SpatialReferenceBuilder.CreateSpatialReference(horizontal)).Wkt);
+                return null;
+            }
+            catch (ArgumentException)
+            {
+                return vertical > 0
+                    ? $"Pro doesn't recognize the coordinate system {horizontal} + {vertical}. Check the horizontal and vertical WKIDs."
+                    : $"Pro doesn't recognize the coordinate system {horizontal}. Check the WKID.";
+            }
+        }
+
+        #endregion
+
         public ICommand BrowseNewDatasetCommand => new RelayCommand(BrowseNewDataset);
         public ICommand BrowseExistingDatasetCommand => new RelayCommand(BrowseExistingDataset);
 
@@ -697,6 +858,13 @@ namespace KylidarAddin
             bool convert = SelectedOutputMode != OutputMode.DownloadCopcOnly;
             bool discardRaw = SelectedOutputMode == OutputMode.ConvertDiscardCopc;
 
+            var pointFilter = convert ? BuildPointFilter() : PointFilter.KeepAll;
+            if (pointFilter.IsEmpty)
+            {
+                ExportScriptStatusText = "The point filter keeps nothing: tick at least one classification and one return type.";
+                return;
+            }
+
             var dlg = new ExportScriptDialog(OutputFolder) { Owner = System.Windows.Application.Current?.MainWindow };
             if (dlg.ShowDialog() != true) { ExportScriptStatusText = "Export cancelled."; return; }
 
@@ -745,13 +913,13 @@ namespace KylidarAddin
                     // Append the manifest straight onto the copied exe (see AppendEmbeddedManifest)
                     // instead of writing a sidecar .json -- Export Script's "Executable" option
                     // then produces exactly one file, matching what a plain "download exe" implies.
-                    AppendEmbeddedManifest(destExe, BuildDownloaderManifest(tileUrls, dlg.DestinationFolder, convert, discardRaw, aoiInfo.CropWktParts));
+                    AppendEmbeddedManifest(destExe, BuildDownloaderManifest(tileUrls, dlg.DestinationFolder, convert, discardRaw, aoiInfo.CropWktParts, pointFilter));
                     outputPath = destExe;
                 }
                 else
                 {
                     var script = ExportScriptService.BuildScript(
-                        dlg.SelectedFormat, tileUrls, dlg.DestinationFolder, convert, discardRaw, aoiInfo.CropWktParts);
+                        dlg.SelectedFormat, tileUrls, dlg.DestinationFolder, convert, discardRaw, aoiInfo.CropWktParts, pointFilter);
 
                     var ext = dlg.SelectedFormat switch
                     {
@@ -777,7 +945,8 @@ namespace KylidarAddin
 
         /// <summary>Manifest consumed by the bundled KylidarDownloader.exe (tools\KylidarDownloader\Program.cs).</summary>
         private static string BuildDownloaderManifest(
-            IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts)
+            IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts,
+            PointFilter pointFilter)
         {
             var manifest = new
             {
@@ -785,6 +954,8 @@ namespace KylidarAddin
                 convert,
                 discardRaw,
                 cropWktParts = cropWktParts ?? Array.Empty<string>(),
+                pointLimits = pointFilter?.PdalLimits() ?? "",
+                pointExpression = pointFilter?.PdalExpression() ?? "",
                 tiles = tileUrls
             };
             return System.Text.Json.JsonSerializer.Serialize(manifest);
@@ -824,6 +995,13 @@ namespace KylidarAddin
                 return;
             }
 
+            var pointFilter = SelectedOutputMode == OutputMode.DownloadCopcOnly ? PointFilter.KeepAll : BuildPointFilter();
+            if (pointFilter.IsEmpty)
+            {
+                ValidationText = "The point filter keeps nothing: tick at least one classification and one return type.";
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(OutputFolder))
             {
                 ValidationText = "Choose an output folder.";
@@ -837,6 +1015,13 @@ namespace KylidarAddin
             if (SelectedDatasetAction == DatasetAction.AddExisting && string.IsNullOrWhiteSpace(ExistingDatasetPath))
             {
                 ValidationText = "Choose the existing LAS dataset to add to.";
+                return;
+            }
+
+            var coordinateSystemError = await ResolveLasdSpatialReferenceAsync();
+            if (coordinateSystemError != null)
+            {
+                ValidationText = coordinateSystemError;
                 return;
             }
 
@@ -888,7 +1073,7 @@ namespace KylidarAddin
                 else
                 {
                     bool keepRawCopc = SelectedOutputMode == OutputMode.ConvertKeepCopc;
-                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, sources, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, CompressToZlas, progress, runProgress, searchLimit, _cts.Token);
+                    result = await CopcClipService.ConvertToLasAsync(aoiInfo.GeoJson, sources, keepRawCopc, OutputFolder, aoiInfo.CropWktParts, CompressToZlas, pointFilter, progress, runProgress, searchLimit, _cts.Token);
                 }
 
                 // After the point data so a breakline problem can't cost the tiles; still inside
@@ -1008,7 +1193,7 @@ namespace KylidarAddin
             if (SelectedDatasetAction == DatasetAction.CreateNew)
             {
                 datasetPath = NewDatasetPath;
-                ok = await LasDatasetService.CreateLasDatasetAsync(lasList, datasetPath, progress, surfaceConstraint);
+                ok = await LasDatasetService.CreateLasDatasetAsync(lasList, datasetPath, progress, surfaceConstraint, _lasdSpatialReferenceWkt);
             }
             else
             {

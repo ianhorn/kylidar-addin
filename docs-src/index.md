@@ -22,6 +22,8 @@ by a [STAC API](https://github.com/radiantearth/stac-api-spec) and [PDAL](https:
   (there's no merge-into-one-file step).
 - **Optional clip to area of interest**: crop each tile to the AOI (plus an optional buffer) during
   conversion, instead of always keeping every tile in full.
+- **Point filter**: keep only the classifications you want (ground, vegetation, buildings, ...)
+  and only certain returns (single, first, intermediate, last) in the converted output, in the pane and in exported scripts.
 - **zLAS compression** (on by default, can be turned off): compress converted `.las` output to
   Esri's own zLAS format via the Convert LAS geoprocessing tool (needs the 3D Analyst extension).
 - **Concurrent, adaptive processing**: tiles download and convert in parallel, throttled by CPU

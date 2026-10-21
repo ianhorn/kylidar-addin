@@ -56,6 +56,54 @@ yet to compress.
   compression is an arcpy/3D Analyst-only step with no portable equivalent -- exported kits always
   produce plain `.las`.
 
+## Point filter
+
+The **Point filter** section (collapsed by default, just above the output folder) chooses which
+points end up in the converted `.las` -- by LAS classification and by return. Its header always says
+what is kept, e.g. **Point filter: Ground; last return** (or **all points** when nothing is filtered).
+
+- **Classes.** One checkbox per LAS class (0 Never classified ... 18 High noise, plus **Other (19 and
+  up)**). The preset buttons **All** and **None** (toggle every class on or off), **Ground only**, **Without noise**, **Vegetation** and
+  **Buildings** tick a common set in one click. Tick at least one class -- with none ticked, Run and
+  Export Script stop with a message.
+- **Returns.** Every point is one return of a laser pulse, and each return falls into exactly one of
+  four groups -- the same split PDAL uses:
+    - **Single return** -- the pulse produced only one return (bare ground, pavement, roofs).
+    - **First of many** -- the first return of a pulse that had two or more (typically the canopy top).
+    - **Intermediate** -- returns between the first and the last of a pulse with three or more
+      (branches, understory).
+    - **Last of many** -- the last return of a pulse that had two or more (the deepest hit, often the
+      ground under vegetation).
+
+  Tick any combination. The buttons set the common ones: **All**, **First (incl. single)** (single +
+  first of many -- every pulse's first return), **Last (incl. single)** (single + last of many --
+  every pulse's last return) and **Multiple only** (everything except single returns).
+
+  For **bare ground** you usually want **Last (incl. single)**: open ground is mostly single
+  returns, so ticking only *Last of many* (PDAL's strict "last") would throw most of it away.
+
+- **Exclude overlap points.** Where flight lines overlap, the same ground is scanned twice, and the
+  lidar flags the extra points as *overlap*. That is a LAS 1.4 **flag**, not a classification: the
+  *Overlap / reserved* class (12) in the class list is empty in KyFromAbove data, so unticking it
+  removes nothing. Tick **Exclude overlap points** to drop the flagged points, which removes the
+  doubled-up coverage. In one Phase 2 tile about a quarter of the points were flagged. It is off by
+  default, and the flag is kept in the `.las` either way, so Pro can still filter on it later.
+
+Classes and returns combine: **Ground only** with **Last (incl. single)** keeps ground points
+that are also the last return of their pulse. Kylidar applies the filter with PDAL after any clip, so the points that survive are the
+ones inside the area of interest *and* matching the filter.
+
+- **Only for converted output.** The filter applies to the two convert modes. **Download COPC
+  file(s) only** keeps the files exactly as published, so the section has no effect there.
+- **Tiles with nothing left are skipped.** If a tile has no points in the chosen classes (say
+  **Water** over dry land), no empty `.las` is written for it; the progress log says it was
+  skipped. If *every* tile comes out empty, the run stops with an error instead of building an
+  empty dataset.
+- **Export Script honors it.** Every exported format (Python, notebook, PowerShell, shell and
+  the `.exe`) carries the same filter as the pane.
+- **Classification comes from the data.** A class only has points where the tile's own
+  classification put them, so an area may have none of some classes (water, rail, wires) at all.
+
 ## Clipping to the area of interest
 
 **Clip to area of interest** is off by default -- when off, every tile is converted (or kept) in
@@ -104,6 +152,24 @@ the old per-run prompt, this choice is made up front:
 A new dataset is created **without computing statistics**, which skips an extra pass over every
 point and so is faster; they can still be computed afterward if you need them.
 
+### Coordinate system
+
+When you create a new dataset, a **Coordinate system** dropdown sets what the dataset is assigned:
+
+- **KY Single Zone (ftUS) + NAVD88 (ftUS)** (default) -- NAD83 / Kentucky Single Zone in US survey
+  feet (WKID 3089) with the NAVD88 height (ftUS) vertical system (WKID 6360). This matches the
+  tiles' real coordinates and avoids a common warning: Phase 3 tiles carry a vertical coordinate
+  system but Phase 2 tiles don't, so a dataset that just takes it from the tiles can end up with
+  none, and ArcGIS Pro then warns *"Layer ... has no vertical coordinate system and participates in
+  scene with vertical coordinate system"* when it is added to a scene.
+- **Same as the tiles** -- leave it to the files, as older versions did.
+- **Custom (WKIDs)...** -- enter a horizontal WKID and, optionally, a vertical WKID (blank for none).
+  A different horizontal system makes the dataset project on the fly. The Z values are in US survey
+  feet, so a vertical system in feet (like 6360) is the right match.
+
+Only the dataset's coordinate system changes; the `.las` files keep their own headers. The choice
+doesn't apply to **Add to existing dataset**, which keeps that dataset's coordinate system.
+
 ### Hydro-enforced breaklines
 
 **Add hydro-enforced breaklines** (available once a dataset option is selected) downloads the
@@ -142,7 +208,7 @@ before it takes effect).
 ## Export Script
 
 Click **Export Script...** to write a stand-alone download/convert kit for the current AOI's
-matching tiles, using the same phase and output-mode settings as Run -- for very large batches,
+matching tiles, using the same phase, output-mode and point-filter settings as Run -- for very large batches,
 running on another machine, or scheduling for later. A dialog asks for a format and a destination
 folder; the line under the format list describes whichever one is selected.
 

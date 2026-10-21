@@ -60,15 +60,16 @@ namespace KylidarAddin.Services
     {
         public static string BuildScript(
             ExportScriptFormat format, IReadOnlyList<string> tileUrls, string destFolder,
-            bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts)
+            bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts, PointFilter pointFilter = null)
         {
             cropWktParts ??= Array.Empty<string>();
+            pointFilter ??= PointFilter.KeepAll;
             return format switch
             {
-                ExportScriptFormat.Python => BuildPython(tileUrls, destFolder, convert, discardRaw, cropWktParts),
-                ExportScriptFormat.Notebook => BuildNotebook(tileUrls, destFolder, convert, discardRaw, cropWktParts),
-                ExportScriptFormat.PowerShell => BuildPowerShell(tileUrls, destFolder, convert, discardRaw, cropWktParts),
-                ExportScriptFormat.Shell => BuildShell(tileUrls, destFolder, convert, discardRaw, cropWktParts),
+                ExportScriptFormat.Python => BuildPython(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
+                ExportScriptFormat.Notebook => BuildNotebook(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
+                ExportScriptFormat.PowerShell => BuildPowerShell(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
+                ExportScriptFormat.Shell => BuildShell(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
                 _ => throw new ArgumentOutOfRangeException(nameof(format))
             };
         }
@@ -76,6 +77,17 @@ namespace KylidarAddin.Services
         private static string EscapePy(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
         private static string EscapePs(string s) => (s ?? "").Replace("'", "''");
         private static string EscapeSh(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");
+
+        /// <summary>The POINT_LIMITS / POINT_EXPRESSION config lines for the Python script and notebook
+        /// (empty strings keep every point) -- see PointFilter for what they mean.</summary>
+        private static IEnumerable<string> PythonPointFilterLines(PointFilter filter) => new[]
+        {
+            "",
+            $"# Point filter: keep {filter.Summary()}. POINT_LIMITS is a PDAL filters.range string, POINT_EXPRESSION a",
+            "# filters.expression (last return only). Both empty = keep every point.",
+            $"POINT_LIMITS = \"{EscapePy(filter.PdalLimits())}\"",
+            $"POINT_EXPRESSION = \"{EscapePy(filter.PdalExpression())}\""
+        };
 
         /// <summary>The "def _convert(raw_path, las_path): ..." function body shared by BuildPython
         /// and BuildNotebook -- see this file's header comment for why it builds a PDAL pipeline
@@ -87,10 +99,8 @@ namespace KylidarAddin.Services
                 "def _convert(raw_path, las_path):",
                 "    is_copc = str(raw_path).lower().endswith(\".copc.laz\")",
                 "    if not CROP_WKT_PARTS:",
-                "        stages = [",
-                "            {\"type\": \"readers.copc\" if is_copc else \"readers.las\", \"filename\": str(raw_path), \"tag\": \"read\"},",
-                "            {\"type\": \"writers.las\", \"filename\": str(las_path), \"inputs\": [\"read\"]},",
-                "        ]",
+                "        stages = [{\"type\": \"readers.copc\" if is_copc else \"readers.las\", \"filename\": str(raw_path), \"tag\": \"read\"}]",
+                "        final_tag = \"read\"",
                 "    else:",
                 "        # Always readers.las + filters.crop, even for a .copc.laz tile -- it reads a COPC",
                 "        # file's points just fine, and readers.copc's own \"polygon\" option can crash PDAL",
@@ -106,7 +116,16 @@ namespace KylidarAddin.Services
                 "        if len(crop_tags) > 1:",
                 "            stages.append({\"type\": \"filters.merge\", \"inputs\": crop_tags, \"tag\": \"merged\"})",
                 "            final_tag = \"merged\"",
-                "        stages.append({\"type\": \"writers.las\", \"filename\": str(las_path), \"inputs\": [final_tag]})",
+                "",
+                "    # Point filter (POINT_LIMITS / POINT_EXPRESSION above): classification runs and first",
+                "    # return via filters.range, last return via filters.expression.",
+                "    if POINT_LIMITS:",
+                "        stages.append({\"type\": \"filters.range\", \"limits\": POINT_LIMITS, \"inputs\": [final_tag], \"tag\": \"keep\"})",
+                "        final_tag = \"keep\"",
+                "    if POINT_EXPRESSION:",
+                "        stages.append({\"type\": \"filters.expression\", \"expression\": POINT_EXPRESSION, \"inputs\": [final_tag], \"tag\": \"match\"})",
+                "        final_tag = \"match\"",
+                "    stages.append({\"type\": \"writers.las\", \"filename\": str(las_path), \"inputs\": [final_tag]})",
                 "",
                 "    pipeline_path = las_path.with_suffix(\".pipeline.json\")",
                 "    with open(pipeline_path, \"w\") as f:",
@@ -122,7 +141,7 @@ namespace KylidarAddin.Services
         }
 
         /// <summary>Build a stand-alone Python 3 script using only the standard library (no "requests" dependency) plus a "pdal" subprocess call for the convert/crop step.</summary>
-        private static string BuildPython(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts)
+        private static string BuildPython(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts, PointFilter pointFilter)
         {
             var lines = new List<string>
             {
@@ -154,6 +173,7 @@ namespace KylidarAddin.Services
             };
             foreach (var wkt in cropWktParts) lines.Add($"    \"{EscapePy(wkt)}\",");
             lines.Add("]");
+            lines.AddRange(PythonPointFilterLines(pointFilter));
             lines.Add("");
             lines.Add("TILES = [");
             foreach (var url in tileUrls) lines.Add($"    \"{EscapePy(url)}\",");
@@ -230,7 +250,7 @@ namespace KylidarAddin.Services
         /// and summary). Written directly as nbformat JSON rather than via a notebook library --
         /// the format is simple enough, and this keeps ExportScriptService dependency-free.
         /// </summary>
-        private static string BuildNotebook(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts)
+        private static string BuildNotebook(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts, PointFilter pointFilter)
         {
             var introSource = new List<string>
             {
@@ -262,6 +282,7 @@ namespace KylidarAddin.Services
             };
             foreach (var wkt in cropWktParts) configLines.Add($"    \"{EscapePy(wkt)}\",");
             configLines.Add("]");
+            configLines.AddRange(PythonPointFilterLines(pointFilter));
             configLines.Add("");
             configLines.Add("TILES = [");
             foreach (var url in tileUrls) configLines.Add($"    \"{EscapePy(url)}\",");
@@ -372,7 +393,7 @@ namespace KylidarAddin.Services
         /// property (e.g. a one-part "polygon"/"inputs" list) down to a bare scalar, which PDAL
         /// would then reject.
         /// </summary>
-        private static string BuildPowerShell(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts)
+        private static string BuildPowerShell(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts, PointFilter pointFilter)
         {
             var lines = new List<string>
             {
@@ -399,6 +420,11 @@ namespace KylidarAddin.Services
             foreach (var wkt in cropWktParts) lines.Add($"    '{EscapePs(wkt)}'");
             lines.Add(")");
             lines.Add("");
+            lines.Add($"# Point filter: keep {pointFilter.Summary()}. $PointLimits is a PDAL filters.range string, $PointExpression a");
+            lines.Add("# filters.expression (last return only). Both empty = keep every point.");
+            lines.Add($"$PointLimits     = '{EscapePs(pointFilter.PdalLimits())}'");
+            lines.Add($"$PointExpression = '{EscapePs(pointFilter.PdalExpression())}'");
+            lines.Add("");
             lines.Add("$Urls = @(");
             foreach (var url in tileUrls) lines.Add($"    '{EscapePs(url)}'");
             lines.Add(")");
@@ -412,7 +438,7 @@ namespace KylidarAddin.Services
             lines.Add("        Start-Sleep -Milliseconds 250");
             lines.Add("    }");
             lines.Add("    $jobs += Start-Job -ScriptBlock {");
-            lines.Add("        param($url, $destFolder, $convert, $discardRaw, $cropWktParts)");
+            lines.Add("        param($url, $destFolder, $convert, $discardRaw, $cropWktParts, $pointLimits, $pointExpression)");
             lines.Add("        $fname = Split-Path $url -Leaf");
             lines.Add("        if (-not $convert) { $rawDir = $destFolder }");
             lines.Add("        elseif ($discardRaw) { $rawDir = Join-Path $destFolder '_raw_tmp' }");
@@ -442,7 +468,8 @@ namespace KylidarAddin.Services
             lines.Add("            $readerType = if ($isCopc) { 'readers.copc' } else { 'readers.las' }");
             lines.Add("");
             lines.Add("            if ($cropWktParts.Count -eq 0) {");
-            lines.Add("                $pipelineJson = '{\"pipeline\":[{\"type\":\"' + $readerType + '\",\"filename\":\"' + (Esc $rawPath) + '\",\"tag\":\"read\"},{\"type\":\"writers.las\",\"filename\":\"' + (Esc $lasPath) + '\",\"inputs\":[\"read\"]}]}'");
+            lines.Add("                $stageParts = @('{\"type\":\"' + $readerType + '\",\"filename\":\"' + (Esc $rawPath) + '\",\"tag\":\"read\"}')");
+            lines.Add("                $finalTag = 'read'");
             lines.Add("            } else {");
             lines.Add("                # Always readers.las + filters.crop, even for a .copc.laz tile -- it reads a");
             lines.Add("                # COPC file's points just fine, and readers.copc's own \"polygon\" option can");
@@ -460,9 +487,20 @@ namespace KylidarAddin.Services
             lines.Add("                    $stageParts += '{\"type\":\"filters.merge\",\"inputs\":[' + $mergeInputs + '],\"tag\":\"merged\"}'");
             lines.Add("                    $finalTag = 'merged'");
             lines.Add("                }");
-            lines.Add("                $stageParts += '{\"type\":\"writers.las\",\"filename\":\"' + (Esc $lasPath) + '\",\"inputs\":[\"' + $finalTag + '\"]}'");
-            lines.Add("                $pipelineJson = '{\"pipeline\":[' + ($stageParts -join ',') + ']}'");
             lines.Add("            }");
+            lines.Add("");
+            lines.Add("            # Point filter ($PointLimits / $PointExpression above): classification runs and first");
+            lines.Add("            # return via filters.range, last return via filters.expression.");
+            lines.Add("            if ($pointLimits) {");
+            lines.Add("                $stageParts += '{\"type\":\"filters.range\",\"limits\":\"' + $pointLimits + '\",\"inputs\":[\"' + $finalTag + '\"],\"tag\":\"keep\"}'");
+            lines.Add("                $finalTag = 'keep'");
+            lines.Add("            }");
+            lines.Add("            if ($pointExpression) {");
+            lines.Add("                $stageParts += '{\"type\":\"filters.expression\",\"expression\":\"' + $pointExpression + '\",\"inputs\":[\"' + $finalTag + '\"],\"tag\":\"match\"}'");
+            lines.Add("                $finalTag = 'match'");
+            lines.Add("            }");
+            lines.Add("            $stageParts += '{\"type\":\"writers.las\",\"filename\":\"' + (Esc $lasPath) + '\",\"inputs\":[\"' + $finalTag + '\"]}'");
+            lines.Add("            $pipelineJson = '{\"pipeline\":[' + ($stageParts -join ',') + ']}'");
             lines.Add("");
             lines.Add("            $pipelinePath = \"$lasPath.pipeline.json\"");
             lines.Add("            Set-Content -Path $pipelinePath -Value $pipelineJson -Encoding utf8 -NoNewline");
@@ -478,7 +516,7 @@ namespace KylidarAddin.Services
             lines.Add("");
             lines.Add("        if ($discardRaw) { Remove-Item $rawPath -Force -ErrorAction SilentlyContinue }");
             lines.Add("        return \"OK   $fname -> $(Split-Path $lasPath -Leaf)\"");
-            lines.Add("    } -ArgumentList $url, $DestFolder, $Convert, $DiscardRaw, $CropWktParts");
+            lines.Add("    } -ArgumentList $url, $DestFolder, $Convert, $DiscardRaw, $CropWktParts, $PointLimits, $PointExpression");
             lines.Add("}");
             lines.Add("");
             lines.Add("$jobs | Wait-Job | Out-Null");
@@ -494,12 +532,22 @@ namespace KylidarAddin.Services
             return string.Join("\r\n", lines);
         }
 
+        /// <summary>The POINT_LIMITS / POINT_EXPRESSION variables for the shell script (empty keeps every point).</summary>
+        private static IEnumerable<string> ShellPointFilterLines(PointFilter filter) => new[]
+        {
+            "",
+            $"# Point filter: keep {filter.Summary()}. POINT_LIMITS is a PDAL filters.range string, POINT_EXPRESSION a",
+            "# filters.expression (last return only). Both empty = keep every point.",
+            $"POINT_LIMITS=\"{EscapeSh(filter.PdalLimits())}\"",
+            $"POINT_EXPRESSION=\"{EscapeSh(filter.PdalExpression())}\""
+        };
+
         /// <summary>
         /// Build a POSIX shell script (macOS/Linux/WSL) using curl, run in batches of $CONCURRENCY
         /// at a time (a plain "wait" after each batch rather than "wait -n", so it works on the old
         /// bash 3.2 macOS still ships by default, not just bash 4.3+).
         /// </summary>
-        private static string BuildShell(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts)
+        private static string BuildShell(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts, PointFilter pointFilter)
         {
             var lines = new List<string>
             {
@@ -531,6 +579,7 @@ namespace KylidarAddin.Services
             };
             foreach (var wkt in cropWktParts) lines.Add($"  \"{EscapeSh(wkt)}\"");
             lines.Add(")");
+            lines.AddRange(ShellPointFilterLines(pointFilter));
             lines.Add("");
             lines.Add("URLS=(");
             foreach (var url in tileUrls) lines.Add($"  \"{EscapeSh(url)}\"");
@@ -561,13 +610,15 @@ namespace KylidarAddin.Services
             lines.Add("  if [ \"$is_copc\" -eq 1 ]; then reader_type=\"readers.copc\"; fi");
             lines.Add("");
             lines.Add("  local pipeline_json");
+            lines.Add("  local stages final_tag");
             lines.Add("  if [ ${#CROP_WKT_PARTS[@]} -eq 0 ]; then");
-            lines.Add("    pipeline_json=\"{\\\"pipeline\\\":[{\\\"type\\\":\\\"$reader_type\\\",\\\"filename\\\":\\\"$raw_path_j\\\",\\\"tag\\\":\\\"read\\\"},{\\\"type\\\":\\\"writers.las\\\",\\\"filename\\\":\\\"$las_path_j\\\",\\\"inputs\\\":[\\\"read\\\"]}]}\"");
+            lines.Add("    stages=\"{\\\"type\\\":\\\"$reader_type\\\",\\\"filename\\\":\\\"$raw_path_j\\\",\\\"tag\\\":\\\"read\\\"}\"");
+            lines.Add("    final_tag=\"read\"");
             lines.Add("  else");
             lines.Add("    # Always readers.las + filters.crop, even for a .copc.laz tile -- it reads a COPC");
             lines.Add("    # file's points just fine, and readers.copc's own \"polygon\" option can crash PDAL");
             lines.Add("    # outright on a complex/high-vertex AOI (see this file's header comment).");
-            lines.Add("    local stages=\"{\\\"type\\\":\\\"readers.las\\\",\\\"filename\\\":\\\"$raw_path_j\\\",\\\"tag\\\":\\\"read\\\"}\"");
+            lines.Add("    stages=\"{\\\"type\\\":\\\"readers.las\\\",\\\"filename\\\":\\\"$raw_path_j\\\",\\\"tag\\\":\\\"read\\\"}\"");
             lines.Add("    local crop_tags=() i=0");
             lines.Add("    for wkt in \"${CROP_WKT_PARTS[@]}\"; do");
             lines.Add("      local wkt_j; wkt_j=\"$(json_escape \"$wkt\")\"");
@@ -576,7 +627,7 @@ namespace KylidarAddin.Services
             lines.Add("      stages=\"${stages},{\\\"type\\\":\\\"filters.crop\\\",\\\"polygon\\\":\\\"${wkt_j}\\\",\\\"a_srs\\\":\\\"EPSG:4326\\\",\\\"inputs\\\":[\\\"read\\\"],\\\"tag\\\":\\\"${tag}\\\"}\"");
             lines.Add("      i=$((i + 1))");
             lines.Add("    done");
-            lines.Add("    local final_tag=\"${crop_tags[0]}\"");
+            lines.Add("    final_tag=\"${crop_tags[0]}\"");
             lines.Add("    if [ ${#crop_tags[@]} -gt 1 ]; then");
             lines.Add("      local merge_inputs=\"\" sep=\"\"");
             lines.Add("      for t in \"${crop_tags[@]}\"; do");
@@ -586,9 +637,20 @@ namespace KylidarAddin.Services
             lines.Add("      stages=\"${stages},{\\\"type\\\":\\\"filters.merge\\\",\\\"inputs\\\":[$merge_inputs],\\\"tag\\\":\\\"merged\\\"}\"");
             lines.Add("      final_tag=\"merged\"");
             lines.Add("    fi");
-            lines.Add("    stages=\"${stages},{\\\"type\\\":\\\"writers.las\\\",\\\"filename\\\":\\\"$las_path_j\\\",\\\"inputs\\\":[\\\"${final_tag}\\\"]}\"");
-            lines.Add("    pipeline_json=\"{\\\"pipeline\\\":[${stages}]}\"");
             lines.Add("  fi");
+            lines.Add("");
+            lines.Add("  # Point filter (POINT_LIMITS / POINT_EXPRESSION above): classification runs and first");
+            lines.Add("  # return via filters.range, last return via filters.expression.");
+            lines.Add("  if [ -n \"$POINT_LIMITS\" ]; then");
+            lines.Add("    stages=\"${stages},{\\\"type\\\":\\\"filters.range\\\",\\\"limits\\\":\\\"${POINT_LIMITS}\\\",\\\"inputs\\\":[\\\"${final_tag}\\\"],\\\"tag\\\":\\\"keep\\\"}\"");
+            lines.Add("    final_tag=\"keep\"");
+            lines.Add("  fi");
+            lines.Add("  if [ -n \"$POINT_EXPRESSION\" ]; then");
+            lines.Add("    stages=\"${stages},{\\\"type\\\":\\\"filters.expression\\\",\\\"expression\\\":\\\"${POINT_EXPRESSION}\\\",\\\"inputs\\\":[\\\"${final_tag}\\\"],\\\"tag\\\":\\\"match\\\"}\"");
+            lines.Add("    final_tag=\"match\"");
+            lines.Add("  fi");
+            lines.Add("  stages=\"${stages},{\\\"type\\\":\\\"writers.las\\\",\\\"filename\\\":\\\"$las_path_j\\\",\\\"inputs\\\":[\\\"${final_tag}\\\"]}\"");
+            lines.Add("  pipeline_json=\"{\\\"pipeline\\\":[${stages}]}\"");
             lines.Add("");
             lines.Add("  local pipeline_path=\"${las_path}.pipeline.json\"");
             lines.Add("  printf '%s' \"$pipeline_json\" > \"$pipeline_path\"");

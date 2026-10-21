@@ -26,9 +26,9 @@ namespace KylidarAddin.Services
         /// in_surface_constraints, spatial_reference, compute_stats -- so getting to compute_stats
         /// means passing the optional constraint and spatial-reference slots too (empty = unset,
         /// which for the latter keeps the default of taking it from the .las files).</summary>
-        public static async Task<bool> CreateLasDatasetAsync(string lasPaths, string lasdPath, IProgress<string> progress, string surfaceConstraint = null)
+        public static async Task<bool> CreateLasDatasetAsync(string lasPaths, string lasdPath, IProgress<string> progress, string surfaceConstraint = null, string spatialReferenceWkt = null)
         {
-            var args = Geoprocessing.MakeValueArray(lasPaths, lasdPath, "NO_RECURSION", surfaceConstraint ?? "", "", "NO_COMPUTE_STATS");
+            var args = Geoprocessing.MakeValueArray(lasPaths, lasdPath, "NO_RECURSION", surfaceConstraint ?? "", spatialReferenceWkt ?? "", "NO_COMPUTE_STATS");
             var result = await Geoprocessing.ExecuteToolAsync("CreateLasDataset_management", args,
                 environments: null, flags: GPExecuteToolFlags.None).ConfigureAwait(false);
             if (result.IsFailed)

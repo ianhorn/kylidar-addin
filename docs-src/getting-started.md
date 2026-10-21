@@ -44,14 +44,16 @@ breaklines. The steps that follow explain each part.
 6. **Compress to zLAS.** On by default: compresses the converted `.las` output to Esri's own zLAS
    format (needs the 3D Analyst extension) -- uncheck it to keep plain `.las`. See
    [Compress to zLAS](clip-and-run.md#compress-to-zlas).
-7. **Set the output folder.** Defaults to a timestamped folder inside the current project's own
+7. **(Optional) Point filter.** Expand **Point filter** to keep only some classifications (for example
+   ground) or only certain returns (first, last, single...). See [Point filter](clip-and-run.md#point-filter).
+8. **Set the output folder.** Defaults to a timestamped folder inside the current project's own
    folder; use **Browse...** to pick somewhere else.
-8. **(Optional) Add to LAS Dataset.** Choose **Create new dataset** or **Add to existing dataset**
+9. **(Optional) Add to LAS Dataset.** Choose **Create new dataset** or **Add to existing dataset**
    to fold the output `.las` (or `.zlas`) file(s) into a `.lasd` and add it to the map once the run
    finishes. With a dataset chosen you can also check **Add hydro-enforced breaklines** to add the
    Phase 2/3 breaklines inside the AOI as a surface constraint -- see
    [Hydro-enforced breaklines](clip-and-run.md#hydro-enforced-breaklines).
-9. **Click Run.** The pane's progress log fills in live as tiles are found, downloaded, and
+10. **Click Run.** The pane's progress log fills in live as tiles are found, downloaded, and
    converted. **Cancel** stops an in-progress run.
 
 !!! tip "Re-running with different settings"

@@ -34,6 +34,9 @@ internal sealed class Manifest
     public bool Convert { get; set; }
     public bool DiscardRaw { get; set; }
     public List<string> CropWktParts { get; set; } = new();
+    /// <summary>PDAL filters.range "limits" and filters.expression "expression" of the point filter (classes / returns); empty = keep every point.</summary>
+    public string PointLimits { get; set; } = "";
+    public string PointExpression { get; set; } = "";
     public List<string> Tiles { get; set; } = new();
 }
 
@@ -169,7 +172,7 @@ internal static class Program
 
         try
         {
-            await ConvertAsync(rawPath, lasPath, isCopc, manifest.CropWktParts);
+            await ConvertAsync(rawPath, lasPath, isCopc, manifest.CropWktParts, manifest.PointLimits, manifest.PointExpression);
         }
         catch (Exception ex)
         {
@@ -195,9 +198,9 @@ internal static class Program
     /// <summary>Build a single-tile PDAL pipeline JSON file and run "pdal pipeline" on it -- see
     /// this file's header comment for why (command-line length, and readers.copc's polygon-crash
     /// bug). Mirrors CopcClipService.BuildSingleTileConvertPipelineJson exactly.</summary>
-    private static async Task ConvertAsync(string rawPath, string lasPath, bool isCopc, List<string> cropWktParts)
+    private static async Task ConvertAsync(string rawPath, string lasPath, bool isCopc, List<string> cropWktParts, string pointLimits, string pointExpression)
     {
-        var pipelineJson = BuildPipelineJson(rawPath, lasPath, isCopc, cropWktParts);
+        var pipelineJson = BuildPipelineJson(rawPath, lasPath, isCopc, cropWktParts, pointLimits, pointExpression);
         var pipelinePath = Path.ChangeExtension(lasPath, ".pipeline.json");
         await File.WriteAllTextAsync(pipelinePath, pipelineJson);
         try
@@ -226,7 +229,7 @@ internal static class Program
     /// <summary>Built via Utf8JsonWriter, not JsonSerializer.Serialize on an anonymous type --
     /// this project publishes trimmed, and anonymous-type reflection-based serialization isn't
     /// trim-safe (unlike the source-generated ManifestJsonContext used for the manifest itself).</summary>
-    private static string BuildPipelineJson(string rawPath, string lasPath, bool isCopc, List<string> cropWktParts)
+    private static string BuildPipelineJson(string rawPath, string lasPath, bool isCopc, List<string> cropWktParts, string pointLimits, string pointExpression)
     {
         using var ms = new MemoryStream();
         using (var w = new Utf8JsonWriter(ms))
@@ -288,6 +291,35 @@ internal static class Program
                 w.WriteString("filename", rawPath);
                 w.WriteString("tag", readTag);
                 w.WriteEndObject();
+            }
+
+            if (!string.IsNullOrEmpty(pointLimits))
+            {
+                const string rangeTag = "keep";
+                w.WriteStartObject();
+                w.WriteString("type", "filters.range");
+                w.WriteString("limits", pointLimits);
+                w.WritePropertyName("inputs");
+                w.WriteStartArray();
+                w.WriteStringValue(finalInputTag);
+                w.WriteEndArray();
+                w.WriteString("tag", rangeTag);
+                w.WriteEndObject();
+                finalInputTag = rangeTag;
+            }
+            if (!string.IsNullOrEmpty(pointExpression))
+            {
+                const string expressionTag = "match";
+                w.WriteStartObject();
+                w.WriteString("type", "filters.expression");
+                w.WriteString("expression", pointExpression);
+                w.WritePropertyName("inputs");
+                w.WriteStartArray();
+                w.WriteStringValue(finalInputTag);
+                w.WriteEndArray();
+                w.WriteString("tag", expressionTag);
+                w.WriteEndObject();
+                finalInputTag = expressionTag;
             }
 
             w.WriteStartObject();

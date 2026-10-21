@@ -124,6 +124,72 @@
             <TextBlock Text="Warning: polygons with holes, gaps, or islands can cause the Run process to error when clipping is enabled." Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,6"
                        Visibility="{Binding ShowAoiClipComplexityWarning, Converter={StaticResource BoolToVis}}"/>
 
+            <Expander Header="{Binding PointFilterHeader}" Margin="0,4,0,6" IsExpanded="False"
+                      ToolTip="Choose which points end up in the converted .las: by LAS classification and by first, last or all returns. Only applies to the two convert modes -- 'Download COPC file(s) only' keeps the files as published.">
+                <StackPanel Margin="16,4,0,0">
+                    <ItemsControl ItemsSource="{Binding PointClassPresets}" Margin="0,0,0,4">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Content="{Binding Name}" Padding="6,2" Margin="0,0,4,4"
+                                        Command="{Binding Path=DataContext.ApplyPointClassPresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding Codes}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <ItemsControl ItemsSource="{Binding PointClasses}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="1"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Content="{Binding DisplayLabel}" IsChecked="{Binding IsChecked}" Margin="0,0,0,2"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,2">
+                        <TextBlock Text="Returns:" VerticalAlignment="Center"/>
+                        <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                                ToolTip="Every point is a return from a laser pulse. A pulse with one return is 'Single'; otherwise its first return is 'First of many', its last is 'Last of many' and any in between are 'Intermediate'. Tick any combination. For bare ground you usually want Last returns including single ones (the 'Last (incl. single)' button), because open ground is mostly single returns. Ticking only 'Last of many' is PDAL's strict 'last' and drops single returns."/>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding ReturnPresets}" Margin="0,0,0,4">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Content="{Binding Name}" Padding="6,2" Margin="0,0,4,4"
+                                        Command="{Binding Path=DataContext.ApplyReturnPresetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding Groups}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <CheckBox Content="Single return (only one return)" IsChecked="{Binding ReturnSingle}" Margin="0,0,0,2"
+                              ToolTip="Pulses that produced exactly one return, e.g. bare ground, pavement or a roof."/>
+                    <CheckBox Content="First of many" IsChecked="{Binding ReturnFirst}" Margin="0,0,0,2"
+                              ToolTip="The first return of a pulse that had two or more -- typically the canopy top."/>
+                    <CheckBox Content="Intermediate" IsChecked="{Binding ReturnIntermediate}" Margin="0,0,0,2"
+                              ToolTip="Returns between the first and the last of a pulse with three or more returns -- branches and understory."/>
+                    <CheckBox Content="Last of many" IsChecked="{Binding ReturnLast}" Margin="0,0,0,2"
+                              ToolTip="The last return of a pulse that had two or more -- the deepest hit, often the ground under vegetation."/>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <CheckBox Content="Exclude overlap points" IsChecked="{Binding ExcludeOverlap}" VerticalAlignment="Center"/>
+                        <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                                ToolTip="Where flight lines overlap, the same ground is scanned twice and the lidar flags the extra points as 'overlap' (a LAS 1.4 flag, not a classification -- the Overlap / reserved class above is empty in this data). Tick this to drop those points, which removes the doubled-up coverage and the intensity/elevation differences between flight lines. Unticked keeps everything; the flag stays in the .las so Pro can still filter on it later."/>
+                    </StackPanel>
+                    <TextBlock Text="Tick at least one classification and one return type." Foreground="Red" Margin="0,4,0,0"
+                               Visibility="{Binding PointFilterIsEmpty, Converter={StaticResource BoolToVis}}"/>
+                </StackPanel>
+            </Expander>
+
             <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -150,6 +216,35 @@
                 <TextBox Text="{Binding NewDatasetPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,6,0"/>
                 <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseNewDatasetCommand}" Padding="8,3"/>
             </Grid>
+
+            <StackPanel Margin="0,0,0,6" Visibility="{Binding ShowNewDatasetPath, Converter={StaticResource BoolToVis}}">
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                    <TextBlock Text="Coordinate system:" VerticalAlignment="Center"/>
+                    <Button Content="i" Style="{StaticResource InfoButtonStyle}"
+                            ToolTip="The coordinate system assigned to the new LAS dataset. Phase 3 tiles carry a vertical coordinate system (NAVD88 height, ftUS) but Phase 2 tiles don't, so without this the dataset can have no vertical and Pro warns when it is added to a scene that has one. The default sets NAD83 Kentucky Single Zone (ftUS) + NAVD88 height (ftUS), which is what the tiles' coordinates actually are. 'Same as tiles' leaves it to the files. 'Custom' takes any horizontal (and optional vertical) WKID -- a different horizontal system makes the dataset project on the fly; the .las files themselves are not changed."/>
+                </StackPanel>
+                <ComboBox SelectedIndex="{Binding LasdCoordinateSystemIndex}">
+                    <ComboBoxItem Content="KY Single Zone (ftUS) + NAVD88 (ftUS)"/>
+                    <ComboBoxItem Content="Same as the tiles"/>
+                    <ComboBoxItem Content="Custom (WKIDs)..."/>
+                </ComboBox>
+                <Grid Margin="0,4,0,0" Visibility="{Binding ShowCustomLasdCoordinateSystem, Converter={StaticResource BoolToVis}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Horizontal WKID:" VerticalAlignment="Center" Margin="0,0,6,4"/>
+                    <TextBox Grid.Column="1" Text="{Binding CustomHorizontalWkid, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"
+                             ToolTip="e.g. 3089 (NAD83 / Kentucky Single Zone, ftUS), 3857 (Web Mercator), 26916 (NAD83 / UTM 16N)"/>
+                    <TextBlock Grid.Row="1" Text="Vertical WKID:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding CustomVerticalWkid, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="e.g. 6360 (NAVD88 height, ftUS) or 5703 (NAVD88 height, meters). Leave blank for none. The Z values are in US survey feet, so pick a matching unit."/>
+                </Grid>
+            </StackPanel>
 
             <Grid Margin="0,0,0,6" Visibility="{Binding ShowExistingDatasetPath, Converter={StaticResource BoolToVis}}">
                 <Grid.ColumnDefinitions>

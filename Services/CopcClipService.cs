@@ -284,7 +284,7 @@ namespace KylidarAddin.Services
         /// </param>
         public static async Task<ClipResult> ConvertToLasAsync(
             string geoJson, IReadOnlyList<SourceCollections> sources,
-            bool keepRawCopc, string outputFolder, IReadOnlyList<string> cropWktParts, bool compressToZlas,
+            bool keepRawCopc, string outputFolder, IReadOnlyList<string> cropWktParts, bool compressToZlas, PointFilter pointFilter,
             IProgress<string> progress, IProgress<RunProgress> runProgress = null,
             int searchLimit = DefaultSearchLimit, CancellationToken ct = default)
         {
@@ -360,16 +360,24 @@ namespace KylidarAddin.Services
                     ? $"Converting and clipping {localTiles.Count} point cloud tile(s) to the AOI (up to {MaxTileConvertConcurrency} of {Environment.ProcessorCount} cores)..."
                     : $"Converting {localTiles.Count} point cloud tile(s) (up to {MaxTileConvertConcurrency} of {Environment.ProcessorCount} cores)...");
 
+                if (pointFilter != null && pointFilter.IsActive)
+                    progress?.Report($"Point filter: keeping {pointFilter.Summary()}.");
+
                 var outputPaths = localTiles.Select(t => Path.Combine(lasFolder, TileBaseName(t.path) + ".las")).ToList();
                 runProgress?.Report(new RunProgress { Phase = "Converting", Completed = 0, Total = tiles.Count, OverallFraction = 0.5 });
                 try
                 {
-                    await RunPerTileConversionsAsync(localTiles, outputPaths, cropWktParts, progress, runProgress, tiles.Count, ct).ConfigureAwait(false);
+                    await RunPerTileConversionsAsync(localTiles, outputPaths, cropWktParts, pointFilter, progress, runProgress, tiles.Count, ct).ConfigureAwait(false);
                 }
                 catch (PdalStageFailedException ex)
                 {
                     return new ClipResult { Success = false, Error = ex.Message };
                 }
+
+                // Tiles the point filter left empty were deleted above.
+                outputPaths = outputPaths.Where(File.Exists).ToList();
+                if (outputPaths.Count == 0)
+                    return new ClipResult { Success = false, Error = "No points matched the point filter in any tile -- loosen the classes/returns and run again." };
 
                 if (compressToZlas)
                 {
@@ -437,30 +445,50 @@ namespace KylidarAddin.Services
         /// this mode -- see RunProgress's doc comment.</summary>
         private static Task RunPerTileConversionsAsync(
             IReadOnlyList<(string path, bool isCopc)> localTiles, IReadOnlyList<string> outputPaths,
-            IReadOnlyList<string> cropWktParts, IProgress<string> progress, IProgress<RunProgress> runProgress,
+            IReadOnlyList<string> cropWktParts, PointFilter pointFilter, IProgress<string> progress, IProgress<RunProgress> runProgress,
             int totalTileCount, CancellationToken ct)
         {
             int completed = 0;
             var jobs = localTiles.Select((tile, i) =>
                 (Func<Task>)(async () =>
                 {
-                    await ConvertOneTileAsync(tile, outputPaths[i], cropWktParts, progress, ct).ConfigureAwait(false);
+                    await ConvertOneTileAsync(tile, outputPaths[i], cropWktParts, pointFilter, progress, ct).ConfigureAwait(false);
                     var done = Interlocked.Increment(ref completed);
                     runProgress?.Report(new RunProgress { Phase = "Converting", Completed = done, Total = totalTileCount, OverallFraction = 0.5 + 0.5 * done / totalTileCount });
                 }));
             return RunWithAdaptiveConcurrencyAsync(jobs, MaxTileConvertConcurrency, ct);
         }
 
+        private static readonly System.Text.RegularExpressions.Regex PointsWrittenPattern =
+            new System.Text.RegularExpressions.Regex(@"PDAL: (\d+) points written");
+
+        /// <summary>The point count PdalRunner prints ("PDAL: N points written"), or -1 if it isn't in the log.</summary>
+        private static long PointsWritten(string log)
+        {
+            var m = log == null ? null : PointsWrittenPattern.Match(log);
+            return m != null && m.Success && long.TryParse(m.Groups[1].Value, out var n) ? n : -1;
+        }
+
         /// <summary>Run a single tile through its own PDAL process: read (COPC or LAS), optionally
-        /// crop to the AOI, and write to outputPath. Throws PdalStageFailedException on failure.</summary>
+        /// crop to the AOI, filter by class/return, and write to outputPath. Throws
+        /// PdalStageFailedException on failure.</summary>
         private static async Task ConvertOneTileAsync(
-            (string path, bool isCopc) tile, string outputPath, IReadOnlyList<string> cropWktParts,
+            (string path, bool isCopc) tile, string outputPath, IReadOnlyList<string> cropWktParts, PointFilter pointFilter,
             IProgress<string> progress, CancellationToken ct)
         {
-            var pipelineJson = BuildSingleTileConvertPipelineJson(tile.path, tile.isCopc, outputPath, cropWktParts);
+            var pipelineJson = BuildSingleTileConvertPipelineJson(tile.path, tile.isCopc, outputPath, cropWktParts, pointFilter);
             var result = await PdalRunner.RunPipelineAsync(pipelineJson, progress, ct).ConfigureAwait(false);
             if (!result.Success)
                 throw new PdalStageFailedException(result.Error ?? $"PDAL failed converting {Path.GetFileName(tile.path)}.");
+            // A tile with nothing in the chosen classes/returns (e.g. "Water only" over dry land) would
+            // otherwise leave a header-only .las behind, which then shows up as an empty output and
+            // gets compressed and added to the LAS dataset. Drop it instead.
+            if (pointFilter != null && pointFilter.IsActive && PointsWritten(result.Log) == 0)
+            {
+                try { File.Delete(outputPath); } catch { /* ignore */ }
+                progress?.Report($"{Path.GetFileName(tile.path)}: no points match the point filter; skipped.");
+                return;
+            }
             progress?.Report($"Converted {Path.GetFileName(tile.path)}.");
         }
 
@@ -553,7 +581,7 @@ namespace KylidarAddin.Services
         /// thousands of miles from Kentucky.
         /// </summary>
         private static string BuildSingleTileConvertPipelineJson(
-            string tilePath, bool isCopc, string outputPath, IReadOnlyList<string> cropWktParts)
+            string tilePath, bool isCopc, string outputPath, IReadOnlyList<string> cropWktParts, PointFilter pointFilter = null)
         {
             bool clip = cropWktParts != null && cropWktParts.Count > 0;
 
@@ -617,6 +645,39 @@ namespace KylidarAddin.Services
                     w.WriteString("filename", tilePath);
                     w.WriteString("tag", readTag);
                     w.WriteEndObject();
+                }
+
+                // Point filter (classes / returns -- see PointFilter): range for the classification
+                // runs and first return, expression for the last return.
+                var limits = pointFilter?.PdalLimits();
+                if (!string.IsNullOrEmpty(limits))
+                {
+                    const string rangeTag = "keep";
+                    w.WriteStartObject();
+                    w.WriteString("type", "filters.range");
+                    w.WriteString("limits", limits);
+                    w.WritePropertyName("inputs");
+                    w.WriteStartArray();
+                    w.WriteStringValue(finalInputTag);
+                    w.WriteEndArray();
+                    w.WriteString("tag", rangeTag);
+                    w.WriteEndObject();
+                    finalInputTag = rangeTag;
+                }
+                var expression = pointFilter?.PdalExpression();
+                if (!string.IsNullOrEmpty(expression))
+                {
+                    const string expressionTag = "match";
+                    w.WriteStartObject();
+                    w.WriteString("type", "filters.expression");
+                    w.WriteString("expression", expression);
+                    w.WritePropertyName("inputs");
+                    w.WriteStartArray();
+                    w.WriteStringValue(finalInputTag);
+                    w.WriteEndArray();
+                    w.WriteString("tag", expressionTag);
+                    w.WriteEndObject();
+                    finalInputTag = expressionTag;
                 }
 
                 w.WriteStartObject();
