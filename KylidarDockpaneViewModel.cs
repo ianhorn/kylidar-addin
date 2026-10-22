@@ -47,6 +47,17 @@ namespace KylidarAddin
 
         protected KylidarDockpaneViewModel()
         {
+            try
+            {
+                Initialize();
+                PointClasses = new System.Collections.ObjectModel.ObservableCollection<PointClassOption>(
+                    PointFilter.Classes.Select(c => new PointClassOption(c.Code, c.Label, OnPointFilterChanged)));
+            }
+            catch (Exception ex) { StartupLog.Report("creating the pane", ex); throw; }
+        }
+
+        private void Initialize()
+        {
             ArcGIS.Desktop.Core.Events.ProjectOpenedEvent.Subscribe(_ => RefreshDefaultLocations());
             // AOI changes come from a map-sketch completion, not an input event inside this pane,
             // so WPF's CommandManager.RequerySuggested (which RunCommand's CanExecute relies on)
@@ -58,9 +69,6 @@ namespace KylidarAddin
                 CommandManager.InvalidateRequerySuggested();
             };
             UpdateAoiStatus();
-
-            PointClasses = new System.Collections.ObjectModel.ObservableCollection<PointClassOption>(
-                PointFilter.Classes.Select(c => new PointClassOption(c.Code, c.Label, OnPointFilterChanged)));
         }
 
         internal static void Show()
@@ -1217,6 +1225,10 @@ namespace KylidarAddin
     /// <summary>Ribbon entry point that activates the Kylidar dock pane.</summary>
     internal class KylidarDockpaneShowButton : Button
     {
-        protected override void OnClick() => KylidarDockpaneViewModel.Show();
+        protected override void OnClick()
+        {
+            try { KylidarDockpaneViewModel.Show(); }
+            catch (Exception ex) { StartupLog.Report("opening the pane", ex); throw; }
+        }
     }
 }

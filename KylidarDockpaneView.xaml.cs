@@ -24,7 +24,8 @@ namespace KylidarAddin
 
         public KylidarDockpaneView()
         {
-            InitializeComponent();
+            try { InitializeComponent(); }
+            catch (Exception ex) { StartupLog.Report("loading the pane layout", ex); throw; }
             // Loaded can fire again if the pane is re-shown; the string check below makes that harmless.
             Loaded += (s, e) => WrapToolTips(this);
         }
