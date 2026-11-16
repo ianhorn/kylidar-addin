@@ -99,7 +99,7 @@ ones inside the area of interest *and* matching the filter.
   **Water** over dry land), no empty `.las` is written for it; the progress log says it was
   skipped. If *every* tile comes out empty, the run stops with an error instead of building an
   empty dataset.
-- **Export Script honors it.** Every exported format (Python, notebook, PowerShell, shell and
+- **Export Script honors it.** Every exported format (Python, notebook, R, PowerShell, shell and
   the `.exe`) carries the same filter as the pane.
 - **Classification comes from the data.** A class only has points where the tile's own
   classification put them, so an area may have none of some classes (water, rail, wires) at all.
@@ -219,6 +219,9 @@ The formats:
 - **Python script (.py)** -- needs Python 3 on the machine that runs it.
 - **Jupyter notebook (.ipynb)** -- runs in Jupyter/JupyterLab, VS Code's notebook viewer, or Google
   Colab; the same logic as the Python script, split into cells (config, helpers, run).
+- **R script (.R)** -- needs R (base R only, no packages); run it with `Rscript` or open it in
+  RStudio. Downloads with `download.file` and converts through the same `pdal` pipeline as the other
+  formats. Tiles are processed one at a time rather than in parallel.
 - **PowerShell script (.ps1)** -- Windows only, nothing to install.
 - **Shell script (.sh)** -- macOS/Linux/WSL, needs `curl`.
 - **Executable (.exe)** -- Windows only; a single, self-contained file (the tile list and settings

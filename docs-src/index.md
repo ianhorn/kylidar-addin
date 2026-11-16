@@ -28,7 +28,7 @@ by a [STAC API](https://github.com/radiantearth/stac-api-spec) and [PDAL](https:
   Esri's own zLAS format via the Convert LAS geoprocessing tool (needs the 3D Analyst extension).
 - **Concurrent, adaptive processing**: tiles download and convert in parallel, throttled by CPU
   count and live memory pressure so a large run doesn't starve the rest of the system.
-- **Export Script**: write a stand-alone Python, Jupyter notebook, PowerShell, or shell
+- **Export Script**: write a stand-alone Python, Jupyter notebook, R, PowerShell, or shell
   download/convert kit for the current AOI's tiles, to run later or on another machine without
   ArcGIS Pro.
 - **Live progress log** in the pane itself as tiles are found, fetched, and converted, with a

@@ -54,7 +54,7 @@ namespace KylidarAddin.Services
     /// <summary>Executable isn't handled by BuildScript below -- KylidarDockpaneViewModel.ExportScriptAsync
     /// special-cases it before ever calling in here, copying the bundled tools\KylidarDownloader\
     /// exe and appending a manifest instead of generating text (see that method).</summary>
-    public enum ExportScriptFormat { Python, Notebook, PowerShell, Shell, Executable }
+    public enum ExportScriptFormat { Python, Notebook, PowerShell, Shell, Executable, R }
 
     internal static class ExportScriptService
     {
@@ -68,6 +68,7 @@ namespace KylidarAddin.Services
             {
                 ExportScriptFormat.Python => BuildPython(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
                 ExportScriptFormat.Notebook => BuildNotebook(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
+                ExportScriptFormat.R => BuildR(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
                 ExportScriptFormat.PowerShell => BuildPowerShell(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
                 ExportScriptFormat.Shell => BuildShell(tileUrls, destFolder, convert, discardRaw, cropWktParts, pointFilter),
                 _ => throw new ArgumentOutOfRangeException(nameof(format))
@@ -77,6 +78,157 @@ namespace KylidarAddin.Services
         private static string EscapePy(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
         private static string EscapePs(string s) => (s ?? "").Replace("'", "''");
         private static string EscapeSh(string s) => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");
+
+        // R double-quoted strings use the same backslash/quote escapes as Python's.
+        private static string EscapeR(string s) => EscapePy(s);
+
+        private const string RBody = @"jstr <- function(x) paste0('""', gsub('""', '\\""', gsub('\\', '\\\\', x, fixed = TRUE), fixed = TRUE), '""')
+
+# Tiny JSON writer for the PDAL pipeline (strings only): a named list is an object, an unnamed list an array.
+to_json <- function(x) {
+  if (is.list(x) && !is.null(names(x))) {
+    paste0('{', paste0(jstr(names(x)), ':', vapply(x, to_json, character(1)), collapse = ','), '}')
+  } else if (is.list(x)) {
+    paste0('[', paste(vapply(x, to_json, character(1)), collapse = ','), ']')
+  } else {
+    jstr(x)
+  }
+}
+
+# Convert (and crop / filter) one tile to .las by running a PDAL pipeline JSON file -- not command-line
+# arguments, which a complex AOI polygon would push past the OS command-length limit.
+convert_tile <- function(raw_path, las_path) {
+  raw_path <- normalizePath(raw_path, winslash = '/', mustWork = FALSE)
+  las_path <- normalizePath(las_path, winslash = '/', mustWork = FALSE)
+  is_copc <- grepl('\\.copc\\.laz$', raw_path, ignore.case = TRUE)
+  if (length(crop_wkt_parts) == 0) {
+    stages <- list(list(type = if (is_copc) 'readers.copc' else 'readers.las', filename = raw_path, tag = 'read'))
+    final_tag <- 'read'
+  } else {
+    # Always readers.las + filters.crop, even for a .copc.laz tile: readers.copc's own polygon option
+    # can crash PDAL outright on a complex AOI.
+    stages <- list(list(type = 'readers.las', filename = raw_path, tag = 'read'))
+    crop_tags <- character(0)
+    for (i in seq_along(crop_wkt_parts)) {
+      tag <- paste0('crop', i)
+      crop_tags <- c(crop_tags, tag)
+      stages[[length(stages) + 1]] <- list(type = 'filters.crop', polygon = crop_wkt_parts[i],
+                                           a_srs = 'EPSG:4326', inputs = list('read'), tag = tag)
+    }
+    final_tag <- crop_tags[1]
+    if (length(crop_tags) > 1) {
+      stages[[length(stages) + 1]] <- list(type = 'filters.merge', inputs = as.list(crop_tags), tag = 'merged')
+      final_tag <- 'merged'
+    }
+  }
+  if (nzchar(point_limits)) {
+    stages[[length(stages) + 1]] <- list(type = 'filters.range', limits = point_limits, inputs = list(final_tag), tag = 'keep')
+    final_tag <- 'keep'
+  }
+  if (nzchar(point_expression)) {
+    stages[[length(stages) + 1]] <- list(type = 'filters.expression', expression = point_expression, inputs = list(final_tag), tag = 'match')
+    final_tag <- 'match'
+  }
+  stages[[length(stages) + 1]] <- list(type = 'writers.las', filename = las_path, inputs = list(final_tag))
+
+  pipeline_path <- sub('\\.las$', '.pipeline.json', las_path)
+  writeLines(to_json(list(pipeline = stages)), pipeline_path)
+  on.exit(unlink(pipeline_path))
+  out <- suppressWarnings(system2('pdal', c('pipeline', shQuote(pipeline_path)), stdout = TRUE, stderr = TRUE))
+  status <- attr(out, 'status')
+  if (!is.null(status) && status != 0) stop(paste(out, collapse = '\n'))
+}
+
+download_tile <- function(url, path) {
+  part <- paste0(path, '.part')
+  tryCatch({
+    status <- suppressWarnings(download.file(url, part, mode = 'wb', quiet = TRUE))
+    if (status != 0) stop('download.file returned ', status)
+    file.rename(part, path)
+    NULL
+  }, error = function(e) {
+    if (file.exists(part)) file.remove(part)
+    conditionMessage(e)
+  })
+}
+
+process_tile <- function(url) {
+  fname <- basename(url)
+  raw_dir <- if (!convert) dest_folder else if (discard_raw) file.path(dest_folder, '_raw_tmp') else file.path(dest_folder, 'COPC')
+  dir.create(raw_dir, recursive = TRUE, showWarnings = FALSE)
+  raw_path <- file.path(raw_dir, fname)
+  err <- download_tile(url, raw_path)
+  if (!is.null(err)) return(paste0('FAIL download ', fname, ': ', err))
+  if (!convert) return(paste0('OK   ', fname))
+
+  las_dir <- if (discard_raw) dest_folder else file.path(dest_folder, 'LAS')
+  dir.create(las_dir, recursive = TRUE, showWarnings = FALSE)
+  base <- sub('(\\.copc\\.laz|\\.laz|\\.las)$', '', fname, ignore.case = TRUE)
+  las_path <- file.path(las_dir, paste0(base, '.las'))
+  err <- tryCatch({ convert_tile(raw_path, las_path); NULL }, error = function(e) conditionMessage(e))
+  if (!is.null(err)) return(paste0('FAIL convert ', fname, ': ', err))
+  if (discard_raw) unlink(raw_path)
+  paste0('OK   ', fname, ' -> ', basename(las_path))
+}
+
+dir.create(dest_folder, recursive = TRUE, showWarnings = FALSE)
+results <- character(0)
+for (url in tiles) {
+  result <- process_tile(url)
+  cat(result, '\n', sep = '')
+  results <- c(results, result)
+}
+ok <- sum(startsWith(results, 'OK'))
+cat(sprintf('\nDone: %d succeeded, %d failed -> %s\n', ok, length(results) - ok, dest_folder))";
+
+        /// <summary>
+        /// Build a stand-alone R script. Base R only for the download (download.file); the convert/crop/
+        /// filter step runs the same PDAL pipeline as the other formats, via the "pdal" CLI (no R LiDAR
+        /// package needed, so the result is identical to the Python script's). Tiles are processed one
+        /// at a time -- base R has no portable parallel download.
+        /// </summary>
+        private static string BuildR(IReadOnlyList<string> tileUrls, string destFolder, bool convert, bool discardRaw, IReadOnlyList<string> cropWktParts, PointFilter pointFilter)
+        {
+            var lines = new List<string>
+            {
+                "#!/usr/bin/env Rscript",
+                "# Kylidar stand-alone download/convert script (base R).",
+                $"# Generated {DateTime.Now:yyyy-MM-dd HH:mm} -- {tileUrls.Count} tile(s).",
+                "#",
+                "# Edit dest_folder below if needed, then run: Rscript \"<this file>\"  (or source() it in R / RStudio)",
+                "# convert needs the \"pdal\" CLI on PATH. LAS dataset creation (an ArcGIS Pro feature) is not",
+                "# included -- add the .las output to a dataset from within Pro if needed.",
+                "",
+                "options(timeout = max(3600, getOption(\"timeout\")))  # big tiles need more than the 60 s default",
+                "",
+                $"dest_folder <- \"{EscapeR(destFolder)}\"",
+                $"convert <- {(convert ? "TRUE" : "FALSE")}",
+                $"discard_raw <- {(discardRaw ? "TRUE" : "FALSE")}",
+                "",
+                "# WKT polygon part(s) to crop each tile to (already buffered) -- empty means no cropping."
+            };
+            if (cropWktParts.Count == 0)
+                lines.Add("crop_wkt_parts <- character(0)");
+            else
+            {
+                lines.Add("crop_wkt_parts <- c(");
+                for (int i = 0; i < cropWktParts.Count; i++)
+                    lines.Add($"  \"{EscapeR(cropWktParts[i])}\"{(i < cropWktParts.Count - 1 ? "," : "")}");
+                lines.Add(")");
+            }
+            lines.Add("");
+            lines.Add($"# Point filter: keep {pointFilter.Summary()}. point_limits is a PDAL filters.range string, point_expression a");
+            lines.Add("# filters.expression (last return only). Both empty = keep every point.");
+            lines.Add($"point_limits <- \"{EscapeR(pointFilter.PdalLimits())}\"");
+            lines.Add($"point_expression <- \"{EscapeR(pointFilter.PdalExpression())}\"");
+            lines.Add("");
+            lines.Add("tiles <- c(");
+            for (int i = 0; i < tileUrls.Count; i++)
+                lines.Add($"  \"{EscapeR(tileUrls[i])}\"{(i < tileUrls.Count - 1 ? "," : "")}");
+            lines.Add(")");
+            lines.Add("");
+            return string.Join("\n", lines) + "\n" + RBody.Replace("\r\n", "\n");
+        }
 
         /// <summary>The POINT_LIMITS / POINT_EXPRESSION config lines for the Python script and notebook
         /// (empty strings keep every point) -- see PointFilter for what they mean.</summary>

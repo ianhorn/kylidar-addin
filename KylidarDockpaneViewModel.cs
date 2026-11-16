@@ -932,6 +932,7 @@ namespace KylidarAddin
                     var ext = dlg.SelectedFormat switch
                     {
                         ExportScriptFormat.Notebook => ".ipynb",
+                        ExportScriptFormat.R => ".R",
                         ExportScriptFormat.PowerShell => ".ps1",
                         ExportScriptFormat.Shell => ".sh",
                         _ => ".py"

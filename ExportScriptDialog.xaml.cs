@@ -20,6 +20,7 @@ namespace KylidarAddin
         {
             ["Python"] = "Needs Python 3 on the machine that runs it.",
             ["Notebook"] = "Runs in Jupyter/JupyterLab, VS Code's notebook viewer, or Google Colab.",
+            ["R"] = "Needs R (base R only -- no packages) and the pdal CLI to convert tiles. Run with Rscript, or open in RStudio.",
             ["PowerShell"] = "Windows only, no install needed.",
             ["Shell"] = "macOS/Linux/WSL. Needs curl.",
             ["Executable"] = "No install needed. Windows only. A single, self-contained .exe -- double-click to run."
@@ -51,6 +52,7 @@ namespace KylidarAddin
                 return tag switch
                 {
                     "Notebook" => ExportScriptFormat.Notebook,
+                    "R" => ExportScriptFormat.R,
                     "PowerShell" => ExportScriptFormat.PowerShell,
                     "Shell" => ExportScriptFormat.Shell,
                     "Executable" => ExportScriptFormat.Executable,
